@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-09-21
+
+- Added near, middle, and far distances for bubbles and food, with perspective size, water contrast, and correct overlap with fish.
+- Replaced flat food ellipses with rounded, shaded 3D pellets that tumble and settle.
+- Replaced fish view switching with continuous projection of a photographed body and thin fins, eliminating pose-boundary jumps.
+- Added frame-continuity checks, particle-depth checks, and frozen 3D orientation checks.
+
 ## 1.0.1 — 2026-09-20
 
 - Fixed double-image ghosting during turns: render one fish view at a time, with precomputed correspondence deformation and opaque bodies.

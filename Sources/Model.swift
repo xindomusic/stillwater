@@ -194,6 +194,9 @@ struct FoodPellet: Identifiable {
     var rotation = 0.0
     var spin = 0.0
     var floatDuration = 0.0
+    var depth = 1.0
+    var tumble = 0.0
+    var tumbleSpeed = 0.0
 }
 
 struct BubbleState {
@@ -202,6 +205,16 @@ struct BubbleState {
     var age: Double
     var riseSpeed: Double, drift: Double, phase: Double, radius: Double
     var generation = 0
+    var depth = 1.0
+}
+
+// Shares the fish's depth axis: larger values are closer to the viewer.
+enum ParticlePerspective {
+    static func scale(_ depth: Double) -> Double { pow(depth, 1.45) }
+    static func layer(_ depth: Double) -> Double { 5 + depth }
+    static func distance(band: Int, fraction: Double) -> Double {
+        [0.55, 0.87, 1.24][band % 3] + fraction * 0.15
+    }
 }
 
 struct AquariumSimulation {
@@ -210,6 +223,8 @@ struct AquariumSimulation {
     private(set) var pendingFood: [FoodPellet] = []
     private(set) var bubbles: [BubbleState] = []
     private var bubbleRandom = AquariumRandom(state: 901283)
+    private var appearanceRandom = AquariumRandom(state: 514991)
+    private var nextBubbleBand = 0
     private var lastDropX: Double?
     private(set) var mealsEaten = 0
     private(set) var time = 0.0
@@ -222,6 +237,7 @@ struct AquariumSimulation {
     init(seed: UInt64 = 42017) {
         random = AquariumRandom(state: seed)
         bubbleRandom = AquariumRandom(state: seed ^ 0xBABB1E)
+        appearanceRandom = AquariumRandom(state: seed ^ 0xF00D)
     }
 
     static func region(for species: FishSpecies, theme: AquariumTheme) -> SwimRegion {
@@ -291,10 +307,12 @@ struct AquariumSimulation {
         let bottom = visibleRegion.bottom
         let y = bottom + bubbleRandom.value(0.01...0.10) * max(0, visibleRegion.top - bottom)
         let radius = bubbleRandom.value(1.1...3.0)
+        let depth = ParticlePerspective.distance(band: nextBubbleBand, fraction: bubbleRandom.next())
+        nextBubbleBand = (nextBubbleBand + 1) % 3
         return BubbleState(x: x, y: y, originX: x, originY: y,
-            age: -bubbleRandom.value(0.2...5.0), riseSpeed: 0.020 + radius * 0.017,
-            drift: bubbleRandom.value(0.001...0.003), phase: bubbleRandom.value(0...(2 * .pi)),
-            radius: radius, generation: (previous?.generation ?? -1) + 1)
+            age: -bubbleRandom.value(0.2...5.0), riseSpeed: (0.020 + radius * 0.017) * ParticlePerspective.scale(depth),
+            drift: bubbleRandom.value(0.001...0.003) * ParticlePerspective.scale(depth), phase: bubbleRandom.value(0...(2 * .pi)),
+            radius: radius, generation: (previous?.generation ?? -1) + 1, depth: depth)
     }
 
     private mutating func advanceBubbles(_ dt: Double, configuration: AquariumConfiguration) {
@@ -347,6 +365,9 @@ struct AquariumSimulation {
             pellet.rotation = random.value(-.pi ... .pi)
             pellet.spin = random.value(-1.4...1.4)
             pellet.floatDuration = random.value(0.12...0.60)
+            pellet.depth = ParticlePerspective.distance(band: nextFoodID, fraction: appearanceRandom.next())
+            pellet.tumble = appearanceRandom.value(-.pi ... .pi)
+            pellet.tumbleSpeed = appearanceRandom.value(0.35...0.85)
             if pellet.releaseDelay == 0 { food.append(pellet) } else { pendingFood.append(pellet) }
             nextFoodID += 1
         }
@@ -373,7 +394,9 @@ struct AquariumSimulation {
             let sinking = min(1, max(0, (food[i].age - food[i].floatDuration) * 2.0))
             food[i].y = max(0.082, food[i].y - dt * food[i].sinkSpeed * sinking)
             food[i].x += sin(food[i].age * 0.8 + food[i].phase) * dt * food[i].drift
-            food[i].rotation += food[i].spin * dt
+            let settling = min(1, max(0, (food[i].y - 0.082) / 0.025))
+            food[i].rotation += food[i].spin * dt * settling
+            food[i].tumble += food[i].tumbleSpeed * dt * settling
         }
         food.removeAll { $0.age > 70 || $0.x < visibleRegion.left || $0.x > visibleRegion.right }
         let previous = fish

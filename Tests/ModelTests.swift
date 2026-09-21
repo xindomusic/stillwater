@@ -181,6 +181,7 @@ import CoreGraphics
             }
         }
         let origins = atmosphere.bubbles.map(\.originX)
+        require(atmosphere.bubbles.contains { $0.depth < 0.7 } && atmosphere.bubbles.contains { $0.depth > 1.2 }, "Bubble population must include near and far water")
         for _ in 0..<3000 { atmosphere.step(delta: 1.0 / 30, configuration: atmosphereConfig) }
         require(atmosphere.bubbles.count == 14 && atmosphere.bubbles.allSatisfy { $0.generation > 0 }, "Bubbles must respawn independently of fish speed")
         require(zip(origins, atmosphere.bubbles).allSatisfy { abs($0 - $1.originX) > 0.001 }, "Bubble origins must change after respawn")
@@ -192,12 +193,16 @@ import CoreGraphics
         var sprinkles = AquariumSimulation(); sprinkles.synchronize(natural); sprinkles.feed(natural)
         require(sprinkles.food.count == 1 && sprinkles.pendingFood.count == 11, "Food must arrive as staggered sprinkles")
         let portion = sprinkles.food + sprinkles.pendingFood
+        require(portion.contains { $0.depth < 0.7 } && portion.contains { $0.depth > 1.2 }, "Each feeding portion must span near and far water")
+        require(ParticlePerspective.scale(1.3) > ParticlePerspective.scale(0.65) * 2, "Distance must visibly change particle size")
+        let orientations = portion.map { [Double($0.id), $0.tumble, $0.rotation, $0.depth] }
         require(Set(portion.map { Int($0.x * 100) }).count > 5, "Pellets must enter at different horizontal positions")
         require(Set(portion.map { $0.sinkSpeed }).count > 5 && Set(portion.map { $0.size }).count > 5, "Pellets need varied size and sinking speed")
         let queue = sprinkles.pendingFood.map(\.releaseDelay)
         var freezeSprinkles = natural; freezeSprinkles.mode = .still
         for _ in 0..<60 { sprinkles.step(delta: 1.0 / 30, configuration: freezeSprinkles) }
         require(sprinkles.pendingFood.map(\.releaseDelay) == queue, "Still mode freezes scheduled sprinkles")
+        require((sprinkles.food + sprinkles.pendingFood).map { [Double($0.id), $0.tumble, $0.rotation, $0.depth] } == orientations, "Still mode freezes 3D pellet orientation and depth")
         for _ in 0..<45 { sprinkles.step(delta: 1.0 / 30, configuration: natural) }
         require(sprinkles.pendingFood.isEmpty, "The portion finishes dropping within 1.5 seconds")
         print("PASS: changing bubble origins, varied pellet sources/size/speed, staggered releases, and complete still freeze")

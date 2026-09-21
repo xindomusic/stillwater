@@ -44,13 +44,6 @@ enum Artwork {
         return (species, texture)
     })
     static func fishTexture(_ species: FishSpecies) -> SKTexture { fishTextures[species]! }
-    static let turnCorrespondence: SKTexture = {
-        let bytes = try! Data(contentsOf: root.appendingPathComponent("Fish/turn-correspondence.flow"))
-        precondition(bytes.count == 1024 * 1024 * 4)
-        let texture = SKTexture(data: bytes, size: CGSize(width: 1024, height: 1024), flipped: true)
-        texture.filteringMode = .linear
-        return texture
-    }()
     // The generated poses have variable widths. Source rectangles keep each whole fish
     // centered at constant physical scale, including the narrow head-on and tail-on views.
     static func poseRect(_ index: Int, species: FishSpecies) -> SIMD4<Float> {

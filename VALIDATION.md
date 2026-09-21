@@ -1,6 +1,6 @@
-# Stillwater 1.0.1 validation
+# Stillwater 1.0.2 validation
 
-Validated September 20, 2026 on an Apple M4, macOS 27.0, with one 3440×1440 display. The app targets Apple Silicon and macOS 14+. Older supported macOS versions have not been tested locally.
+Validated September 21, 2026 on an Apple M4, macOS 27.0, with one 3440×1440 display. The app targets Apple Silicon and macOS 14+. Older supported macOS versions have not been tested locally.
 
 ## Automated model checks
 
@@ -12,20 +12,24 @@ Validated September 20, 2026 on an Apple M4, macOS 27.0, with one 3440×1440 dis
 - All four species in all three scenes reacting to feeding within 1.5 seconds; approach, consumption, departure, and abandonment of unreachable food.
 - Staggered pellet releases from varied locations, different sizes and sinking speeds, portion limits, expiry, and scene-change cleanup.
 - Bubble origins changing on respawn, distribution across the water, and bubble movement independent of fish swimming speed.
-- Complete Still freezing of fish, fins, turns, reaction timers, visible and pending food, and bubbles.
+- Near, middle, and far particle distribution, with depth-dependent apparent size.
+- Complete Still freezing of fish, fins, turns, reaction timers, visible and pending food, pellet tumble, and bubbles.
 
 ## Native shader regression checks
 
 `zsh tools/test-rendering.sh` passes using SpriteKit in a logged-in graphics session:
 
 - A red/blue source-view fixture stays a single source color through five turn-transition samples. It detects the old double-exposure blending path.
-- Enlarged mid-turn captures cover all eight transitions for each of the four species. Bodies now remain solid; fin transparency comes from the original artwork.
+- Enlarged mid-turn captures cover all four species. Bodies remain solid; fin transparency comes from the original artwork.
+- Closely spaced frames straddle former pose boundaries, head-on views, and full-turn wraps for all four species. The largest image change was 7.87%, normalized to visible pixel coverage, within the 8% regression threshold. These checks detect abrupt image switches; they do not establish perceptual smoothness at every frame rate.
 - Each of the three scenes visibly changes with Plant sway enabled alone and Water movement enabled alone.
 - Setting both controls to zero produces identical renders across time.
 - Still mode produces identical renders after attempted advancement with atmosphere controls enabled.
 - Bubble material captures show directional highlights and a clear center. Model tests additionally verify monotonically rising bubbles without position jumps at detachment.
+- Pellet material captures show rounded cylinders, visible caps, directional shading, and near/far contrast. Production node checks confirm far bubbles and food pass behind fish and near particles pass in front.
+- A production feeding capture stays identical in Still mode, including pellet orientation and depth effects.
 
-These are rendering checks, not measurements of a physical display's pixel response or overdrive. Hardware trailing can have a separate cause. The turn renderer fixes a double image reproduced in captured app frames.
+These are rendering checks, not measurements of a physical display's pixel response or overdrive. The continuous fish surface removes pose-image switching while retaining the earlier removal of crossfade ghosting.
 
 ## Native application checks
 
@@ -44,7 +48,7 @@ Another installed instance already owned the global feeding shortcut during the 
 
 ## Short performance sample
 
-The final review measured **29.20 fps** in the live preview, **11.77% of one CPU core** while live, and **0.43% of one core** while still, with **zero still animation frames**. Each mode was sampled for three seconds with a visible 1120×630 preview plus the production desktop window. These are diagnostic samples, not sustained GPU, thermal, or battery benchmarks.
+The final review measured **27.93 fps** in the live preview, **11.66% of one CPU core** while live, and **1.35% of one core** while still, with **zero still animation frames**. Each mode was sampled for three seconds with a visible 1120×630 preview plus the production desktop window. These are diagnostic samples, not sustained GPU, thermal, or battery benchmarks.
 
 ## Images and limits
 
@@ -52,6 +56,6 @@ README scene images and the six-second GIF come from the production renderer. Se
 
 Finder icon dragging, Mission Control/Spaces switching, Stage Manager, physical display hotplug, real hardware sleep/wake, and applying a permanent native wallpaper have not been manually exercised. Appearance checks use this app's AppKit override; they do not change global macOS settings or wait for a scheduled sunset.
 
-Two independent agent review loops were completed during development. Subsequent refinements were tested locally; no historical review score is presented as a rating of this final release. Fish remain layered 2D artwork with procedural motion; richer general schooling is future work.
+Two independent agent review loops were completed during development. Subsequent refinements were tested locally; no historical review score is presented as a rating of this final release. Fish use photographic material projected onto a lightweight curved body and thin fins, rather than complete anatomical models; richer general schooling is future work.
 
 The release app is ad-hoc signed, not Developer ID signed or Apple-notarized. See [installation](docs/INSTALL.md) for first-launch instructions.

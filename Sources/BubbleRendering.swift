@@ -20,15 +20,16 @@ enum BubbleRendering {
                 float luminance = dot(water, vec3(0.2126, 0.7152, 0.0722));
                 water = mix(water, mix(water, vec3(luminance), 0.32) * vec3(0.31, 0.39, 0.51), u_night) * u_brightness;
                 float darkEdge = rim * max(0.0, dot(normal.xy, normalize(vec2(0.65, -0.75))));
-                vec3 color = water * (1.0 - darkEdge * 0.72);
+                float distance = clamp((1.4 - a_depth) / 0.85, 0.0, 1.0);
+                vec3 color = water * (1.0 - darkEdge * mix(0.78, 0.40, distance));
                 vec3 reflectedLight = mix(vec3(0.93, 0.98, 1.0), vec3(0.40, 0.49, 0.65), u_night);
-                color = mix(color, reflectedLight, clamp(glint * 0.95 + reflection * 1.2, 0.0, 1.0));
-                float alpha = coverage * clamp(0.12 + rim * 0.58 + glint * 0.70, 0.0, 0.94);
+                color = mix(color, reflectedLight, clamp(glint * 0.95 + reflection * 1.2, 0.0, 1.0) * (1.0 - distance * 0.4));
+                float alpha = coverage * clamp(0.12 + rim * 0.58 + glint * 0.70, 0.0, 0.94) * (1.0 - distance * 0.35);
                 gl_FragColor = vec4(color * alpha, alpha) * v_color_mix.a;
             }
             """)
         shader.uniforms = [SKUniform(name: "u_brightness", float: 1), SKUniform(name: "u_night", float: 0)]
-        shader.attributes = [SKAttribute(name: "a_waterRect", type: .vectorFloat4), SKAttribute(name: "a_edge", type: .float)]
+        shader.attributes = [SKAttribute(name: "a_waterRect", type: .vectorFloat4), SKAttribute(name: "a_edge", type: .float), SKAttribute(name: "a_depth", type: .float)]
         return shader
     }
 }

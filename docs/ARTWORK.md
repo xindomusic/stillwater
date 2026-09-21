@@ -11,10 +11,9 @@ Stillwater’s bundled scenes and fish views were generated specifically for thi
 | `Resources/Fish/cherry-turns.png` | Eight cherry barb views |
 | `Resources/Fish/pearl-turns.png` | Eight pearl gourami views |
 | `Resources/Fish/loach-turns.png` | Eight kuhli loach views |
-| `Resources/Fish/turn-correspondence.flow` | Offline image-correspondence data derived from the fish views with Apple Vision |
 | `Resources/AppIcon.icns` | App icon drawn by `tools/create-icon.swift` |
 
-[Scene prompts](../Resources/ASSET_PROMPTS.md) and [fish prompts](../Resources/Fish/TURNTABLE_PROMPTS.md) are retained for provenance. Pose rectangles are defined in `Sources/Artwork.swift`; generated atlas columns are not uniformly spaced.
+[Scene prompts](../Resources/ASSET_PROMPTS.md) and [fish prompts](../Resources/Fish/TURNTABLE_PROMPTS.md) are retained for provenance. The continuous turn renderer uses a photographic profile from each atlas as its body and fin material. Pose rectangles are defined in `Sources/Artwork.swift`; generated atlas columns are not uniformly spaced.
 
 Documentation images come from the app’s own renderer and settings. They do not include a user’s desktop or other applications. The settings captures replace the Metal preview with a renderer snapshot, while preserving production controls and layout.
 
