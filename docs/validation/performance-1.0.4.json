@@ -1,0 +1,26 @@
+{
+  "fishTextureRGBABytes" : 3971136,
+  "samples" : [
+    {
+      "cpuPercentOfOneCore" : 13.167981674273824,
+      "fps" : 29.921299709139586,
+      "physicalFootprintMiB" : 142.50086975097656,
+      "scenario" : "default-30"
+    },
+    {
+      "cpuPercentOfOneCore" : 25.509739052651376,
+      "fps" : 29.936987007986971,
+      "physicalFootprintMiB" : 144.40711975097656,
+      "scenario" : "maximum-30"
+    },
+    {
+      "cpuPercentOfOneCore" : 41.236745101463811,
+      "fps" : 57.153539212695826,
+      "physicalFootprintMiB" : 148.84461975097656,
+      "scenario" : "maximum-60"
+    }
+  ],
+  "scope" : "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+  "stillCPUPercentOfOneCore" : 0.61054999999998749,
+  "stillFrames" : 0
+}

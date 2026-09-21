@@ -4,7 +4,7 @@ Stillwater is a native freshwater aquarium wallpaper for Apple Silicon Macs runn
 
 ## Download and open
 
-1. Download `Stillwater-1.0.3-macOS-arm64.dmg` or `.zip` from https://github.com/xindomusic/stillwater/releases/tag/v1.0.3.
+1. Download `Stillwater-1.0.4-macOS-arm64.dmg` or `.zip` from https://github.com/xindomusic/stillwater/releases/tag/v1.0.4.
 2. For the DMG, open the disk image and drag **Stillwater.app** to **Applications**. For the ZIP, extract it and move the app to Applications.
 3. Open Stillwater. Its fish icon appears in the menu bar, and the settings window opens.
 

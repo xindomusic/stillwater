@@ -172,10 +172,13 @@ struct FishState: Identifiable {
     var id: Int
     var species: FishSpecies
     var x: Double, y: Double, vx: Double, vy: Double
-    var phase: Double, depth: Double, yaw: Double
+    var depth: Double, yaw: Double
     var yawVelocity = 0.0
     var finPhase = 0.0
     var stroke = FishStroke(seed: 1)
+    var navigation = FishNavigation(seed: 1, heading: 0)
+    var behaviorRandom = AquariumRandom(state: 1)
+    var pitch = 0.0
     var activity = 1.0
     var mood: FishMood = .cruise
     var moodRemaining = 6.0
@@ -185,6 +188,57 @@ struct FishState: Identifiable {
 
     var spineCurve: SIMD4<Float> {
         stroke.spineCurve(phase: finPhase, species: species)
+    }
+}
+
+/// A fish chooses intentions at irregular intervals; velocity and posture ease toward them.
+struct FishNavigation {
+    private var random: AquariumRandom
+    private(set) var heading: Double
+    private(set) var remaining: Double
+    private(set) var speedFactor = 1.0
+    private(set) var turnLimit = 1.2
+    private(set) var viewAngle = 0.0
+    private(set) var shoalAffinity = 0.15
+    private(set) var decisions = 0
+    private(set) var lastTurn = 0.0
+
+    init(seed: UInt64, heading: Double) {
+        random = AquariumRandom(state: seed)
+        self.heading = heading
+        remaining = random.value(0.4...2.5)
+        speedFactor = random.value(0.65...1.20)
+        turnLimit = random.value(0.65...1.8)
+        viewAngle = random.value(-0.32...0.32)
+    }
+
+    mutating func advance(delta: Double, x: Double, y: Double, region: SwimRegion, resting: Bool) {
+        guard delta > 0 else { return }
+        remaining -= delta
+        guard !resting else { return }
+        let marginX = min(0.055, (region.right - region.left) * 0.18)
+        let marginY = min(0.04, (region.top - region.bottom) * 0.22)
+        let approachingEdge = (x < region.left + marginX && cos(heading) < -0.2)
+            || (x > region.right - marginX && cos(heading) > 0.2)
+            || (y < region.bottom + marginY && sin(heading) < -0.2)
+            || (y > region.top - marginY && sin(heading) > 0.2)
+        guard remaining <= 0 || approachingEdge else { return }
+        let old = heading
+        if approachingEdge {
+            heading = atan2(((region.bottom + region.top) / 2 - y) * 0.65, (region.left + region.right) / 2 - x) + random.value(-0.35...0.35)
+        } else {
+            let choice = random.next()
+            let degrees = choice < 0.62 ? random.value(10...45) : (choice < 0.88 ? random.value(45...100) : random.value(140...180))
+            heading += degrees * .pi / 180 * (random.next() < 0.5 ? -1 : 1)
+        }
+        heading = atan2(sin(heading), cos(heading))
+        lastTurn = AquariumSimulation.angleDifference(heading, old)
+        decisions += 1
+        remaining = random.value(0.8...3.8)
+        speedFactor = random.value(0.50...1.30)
+        turnLimit = random.value(0.55...1.8)
+        viewAngle = random.value(-0.52...0.52)
+        shoalAffinity = random.next() < 0.35 ? 0 : random.value(0.08...0.30)
     }
 }
 
@@ -278,6 +332,8 @@ struct BubbleState {
     var riseSpeed: Double, drift: Double, phase: Double, radius: Double
     var generation = 0
     var depth = 1.0
+    var randomState: UInt64 = 1
+    var depthBand = 0
 }
 
 // Shares the fish's depth axis: larger values are closer to the viewer.
@@ -294,23 +350,21 @@ struct AquariumSimulation {
     private(set) var food: [FoodPellet] = []
     private(set) var pendingFood: [FoodPellet] = []
     private(set) var bubbles: [BubbleState] = []
-    private var bubbleRandom = AquariumRandom(state: 901283)
-    private var appearanceRandom = AquariumRandom(state: 514991)
+    private let entitySeed: UInt64
+    private var nextBubbleID: UInt64 = 0
     private var nextBubbleBand = 0
     private var lastDropX: Double?
     private(set) var mealsEaten = 0
     private(set) var time = 0.0
-    private var movementTime = 0.0
     private var random: AquariumRandom
     private var nextID = 0
     private var nextFoodID = 0
-    private var neighbors: [(id: Int, x: Double, y: Double, size: Double)] = []
+    private var neighbors: [(id: Int, species: FishSpecies, x: Double, y: Double, vx: Double, vy: Double, size: Double)] = []
     private var theme: AquariumTheme?
     var visibleRegion = SwimRegion(left: 0, right: 1, bottom: 0, top: 1)
     init(seed: UInt64 = 42017) {
         random = AquariumRandom(state: seed)
-        bubbleRandom = AquariumRandom(state: seed ^ 0xBABB1E)
-        appearanceRandom = AquariumRandom(state: seed ^ 0xF00D)
+        entitySeed = seed
     }
 
     static func region(for species: FishSpecies, theme: AquariumTheme) -> SwimRegion {
@@ -347,12 +401,16 @@ struct AquariumSimulation {
             let missing = max(0, desired - currentIDs.count)
             let r = Self.region(for: species, theme: configuration.theme).intersecting(visibleRegion)
             for _ in 0..<missing {
-                let direction = random.next() > 0.5 ? 1.0 : -1.0
+                let personalSeed = entitySeed ^ (UInt64(nextID) &* 0x9E3779B97F4A7C15)
+                var birthRandom = AquariumRandom(state: personalSeed ^ 0xB17A)
+                let direction = birthRandom.next() > 0.5 ? 1.0 : -1.0
                 fish.append(FishState(id: nextID, species: species,
-                    x: random.value(r.left...r.right), y: random.value(r.bottom...r.top),
+                    x: birthRandom.value(r.left...r.right), y: birthRandom.value(r.bottom...r.top),
                     vx: direction * species.cruiseSpeed, vy: 0,
-                    phase: random.value(0...(2 * .pi)), depth: random.value(0.70...1.15), yaw: direction > 0 ? 0 : .pi, finPhase: random.value(0...6), moodRemaining: random.value(1...10)))
-                fish[fish.count - 1].stroke = FishStroke(seed: appearanceRandom.state ^ (UInt64(nextID) &* 0x9E3779B97F4A7C15))
+                    depth: birthRandom.value(0.70...1.15), yaw: direction > 0 ? 0 : .pi, finPhase: birthRandom.value(0...6), moodRemaining: birthRandom.value(1...10)))
+                fish[fish.count - 1].stroke = FishStroke(seed: personalSeed ^ 0xF1A5)
+                fish[fish.count - 1].navigation = FishNavigation(seed: personalSeed ^ 0xA11CE, heading: direction > 0 ? 0 : .pi)
+                fish[fish.count - 1].behaviorRandom = AquariumRandom(state: personalSeed ^ 0xBEA710)
                 nextID += 1
             }
         }
@@ -372,6 +430,8 @@ struct AquariumSimulation {
     }
 
     private mutating func makeBubble(previous: BubbleState? = nil) -> BubbleState {
+        var bubbleRandom = AquariumRandom(state: previous?.randomState ?? (entitySeed ^ (nextBubbleID &* 0x9E3779B97F4A7C15) ^ 0xBABB1E))
+        if previous == nil { nextBubbleID += 1 }
         let left = visibleRegion.left, width = max(0.001, visibleRegion.right - left)
         let unit: Double
         if let previous {
@@ -381,12 +441,13 @@ struct AquariumSimulation {
         let bottom = visibleRegion.bottom
         let y = bottom + bubbleRandom.value(0.01...0.10) * max(0, visibleRegion.top - bottom)
         let radius = bubbleRandom.value(1.1...3.0)
-        let depth = ParticlePerspective.distance(band: nextBubbleBand, fraction: bubbleRandom.next())
-        nextBubbleBand = (nextBubbleBand + 1) % 3
+        let band = previous.map { ($0.depthBand + 1) % 3 } ?? nextBubbleBand
+        let depth = ParticlePerspective.distance(band: band, fraction: bubbleRandom.next())
+        if previous == nil { nextBubbleBand = (nextBubbleBand + 1) % 3 }
         return BubbleState(x: x, y: y, originX: x, originY: y,
             age: -bubbleRandom.value(0.2...5.0), riseSpeed: (0.020 + radius * 0.017) * ParticlePerspective.scale(depth),
             drift: bubbleRandom.value(0.001...0.003) * ParticlePerspective.scale(depth), phase: bubbleRandom.value(0...(2 * .pi)),
-            radius: radius, generation: (previous?.generation ?? -1) + 1, depth: depth)
+            radius: radius, generation: (previous?.generation ?? -1) + 1, depth: depth, randomState: bubbleRandom.state, depthBand: band)
     }
 
     private mutating func advanceBubbles(_ dt: Double, configuration: AquariumConfiguration) {
@@ -428,20 +489,21 @@ struct AquariumSimulation {
         let dropY = swimmers.isEmpty ? min(visibleRegion.top, r.top + 0.075) : visibleRegion.top
         for i in 0..<count {
             let batch = i / 4
+            var pelletRandom = AquariumRandom(state: entitySeed ^ (UInt64(nextFoodID) &* 0x9E3779B97F4A7C15) ^ 0xF00D)
             var pellet = FoodPellet(id: nextFoodID,
-                x: min(r.right, max(r.left, sources[batch] + random.value(-0.018...0.018))),
-                y: max(r.bottom, dropY - random.value(0...0.016)))
-            pellet.releaseDelay = i == 0 ? 0 : Double(batch) * 0.42 + random.value(0.06...0.28)
-            pellet.sinkSpeed = random.value(0.017...0.033)
-            pellet.drift = random.value(0.0008...0.003)
-            pellet.phase = random.value(0...(2 * .pi))
-            pellet.size = random.value(0.65...1.15)
-            pellet.rotation = random.value(-.pi ... .pi)
-            pellet.spin = random.value(-1.4...1.4)
-            pellet.floatDuration = random.value(0.12...0.60)
-            pellet.depth = ParticlePerspective.distance(band: nextFoodID, fraction: appearanceRandom.next())
-            pellet.tumble = appearanceRandom.value(-.pi ... .pi)
-            pellet.tumbleSpeed = appearanceRandom.value(0.35...0.85)
+                x: min(r.right, max(r.left, sources[batch] + pelletRandom.value(-0.018...0.018))),
+                y: max(r.bottom, dropY - pelletRandom.value(0...0.016)))
+            pellet.releaseDelay = i == 0 ? 0 : Double(batch) * 0.42 + pelletRandom.value(0.06...0.28)
+            pellet.sinkSpeed = pelletRandom.value(0.017...0.033)
+            pellet.drift = pelletRandom.value(0.0008...0.003)
+            pellet.phase = pelletRandom.value(0...(2 * .pi))
+            pellet.size = pelletRandom.value(0.65...1.15)
+            pellet.rotation = pelletRandom.value(-.pi ... .pi)
+            pellet.spin = pelletRandom.value(-1.4...1.4)
+            pellet.floatDuration = pelletRandom.value(0.12...0.60)
+            pellet.depth = ParticlePerspective.distance(band: nextFoodID, fraction: pelletRandom.next())
+            pellet.tumble = pelletRandom.value(-.pi ... .pi)
+            pellet.tumbleSpeed = pelletRandom.value(0.35...0.85)
             if pellet.releaseDelay == 0 { food.append(pellet) } else { pendingFood.append(pellet) }
             nextFoodID += 1
         }
@@ -458,8 +520,6 @@ struct AquariumSimulation {
         advanceBubbles(dt, configuration: configuration)
         guard configuration.swimmingSpeed > 0 else { return }
         let movement = dt * configuration.swimmingSpeed
-        movementTime += movement
-        let clock = movementTime
         for i in pendingFood.indices { pendingFood[i].releaseDelay -= dt }
         food.append(contentsOf: pendingFood.filter { $0.releaseDelay <= 0 })
         pendingFood.removeAll { $0.releaseDelay <= 0 }
@@ -474,7 +534,7 @@ struct AquariumSimulation {
         }
         food.removeAll { $0.age > 70 || $0.x < visibleRegion.left || $0.x > visibleRegion.right }
         neighbors.removeAll(keepingCapacity: true)
-        for f in fish { neighbors.append((f.id, f.x, f.y, f.species.bodySize * f.depth)) }
+        for f in fish { neighbors.append((f.id, f.species, f.x, f.y, f.vx, f.vy, f.species.bodySize * f.depth)) }
         for i in fish.indices {
             var f = fish[i]
             let home = Self.region(for: f.species, theme: configuration.theme).intersecting(visibleRegion)
@@ -483,22 +543,23 @@ struct AquariumSimulation {
             f.moodRemaining -= movement
             f.appetite = min(1, f.appetite + movement * 0.025)
             if f.moodRemaining <= 0 || (f.mood == .feeding && food.isEmpty) {
-                let roll = random.next()
+                let roll = f.behaviorRandom.next()
                 if roll < (f.species == .pearl ? 0.43 : 0.25) {
-                    f.mood = .hover; f.moodRemaining = random.value(2...5)
+                    f.mood = .hover; f.moodRemaining = f.behaviorRandom.value(2...5)
                 } else if roll > 0.92 {
-                    f.mood = .dash; f.moodRemaining = random.value(0.65...1.2)
+                    f.mood = .dash; f.moodRemaining = f.behaviorRandom.value(0.65...1.2)
                 } else {
                     f.mood = f.species == .loach ? .forage : .cruise
-                    f.moodRemaining = random.value(5...12)
+                    f.moodRemaining = f.behaviorRandom.value(5...12)
                 }
             }
             let schooling = f.species == .rasbora || f.species == .cherry
-            let groupPhase = f.species == .cherry ? 2.4 : 0.0
-            let cx = (r.left + r.right) / 2 + sin(clock * 0.11 + groupPhase) * (r.right - r.left) * 0.29
-            let cy = (r.bottom + r.top) / 2 + sin(clock * 0.08 + groupPhase) * (r.top - r.bottom) * 0.23
-            var tx = schooling ? cx + cos(f.phase * 2) * 0.045 : (r.left + r.right) / 2 + sin(clock * 0.09 + f.phase) * (r.right - r.left) * 0.42
-            var ty = schooling ? cy + sin(f.phase) * 0.07 : (r.bottom + r.top) / 2 + cos(clock * 0.13 + f.phase) * (r.top - r.bottom) * 0.39
+            if f.feeding == nil {
+                f.navigation.advance(delta: movement, x: f.x, y: f.y, region: home, resting: f.mood == .hover)
+            }
+            let lookAhead = 0.075
+            var (tx, ty) = r.constrain(x: f.x + cos(f.navigation.heading) * lookAhead,
+                y: f.y + sin(f.navigation.heading) * lookAhead / 0.65)
             if f.feeding == nil && f.feedingCooldown <= 0 && f.appetite > 0.35 {
                 let awareness = f.species == .loach ? 0.13 : 0.36
                 var closest: FoodPellet?
@@ -512,7 +573,7 @@ struct AquariumSimulation {
                 }
                 if let pellet = closest {
                     f.feeding = FeedingResponse(targetID: pellet.id, x: pellet.x, y: pellet.y,
-                        remaining: random.value(0.15...0.95) + hypot(pellet.x-f.x, (pellet.y-f.y)*0.55) * 1.5)
+                        remaining: f.behaviorRandom.value(0.15...0.95) + hypot(pellet.x-f.x, (pellet.y-f.y)*0.55) * 1.5)
                 }
             }
             var targetFood: Int?
@@ -534,10 +595,10 @@ struct AquariumSimulation {
                 if beginLeaving {
                     // Scatter gently to individual resting spots before joining the group again.
                     (response.x, response.y) = home.constrain(
-                        x: f.x + random.value(-0.09...0.09), y: f.y - random.value(0.045...0.10))
+                        x: f.x + f.behaviorRandom.value(-0.09...0.09), y: f.y - f.behaviorRandom.value(0.045...0.10))
                     let inset = (home.top - home.bottom) * 0.12
                     response.y = min(home.top - inset, max(home.bottom + inset, response.y))
-                    response.remaining = random.value(2.5...4.5); response.age = 0
+                    response.remaining = f.behaviorRandom.value(2.5...4.5); response.age = 0
                 }
                 f.feeding = response
                 r = swimmingRegion(for: f, configuration: configuration)
@@ -551,8 +612,8 @@ struct AquariumSimulation {
                 case .leaving:
                     tx = response.x; ty = response.y; f.mood = .cruise; f.moodRemaining = 3
                     if response.age > 2 && f.y >= home.bottom && f.y <= home.top && (hypot(tx-f.x, (ty-f.y)*0.65) < 0.025 || response.age > 12) {
-                        f.feeding = nil; f.feedingCooldown = random.value(6...10)
-                        f.mood = .hover; f.moodRemaining = random.value(2...4)
+                        f.feeding = nil; f.feedingCooldown = f.behaviorRandom.value(6...10)
+                        f.mood = .hover; f.moodRemaining = f.behaviorRandom.value(2...4)
                     }
                 }
             }
@@ -570,9 +631,13 @@ struct AquariumSimulation {
             }
             f.activity += (desiredActivity - f.activity) * (1 - exp(-movement * 3.5))
             var dx = tx - f.x, dy = (ty - f.y) * 0.65
+            var shoalX = 0.0, shoalY = 0.0, shoalVX = 0.0, shoalVY = 0.0, shoalCount = 0.0
             for other in neighbors where other.id != f.id {
                 let sx = f.x - other.x, sy = (f.y - other.y) * 0.65
                 let squaredDistance = sx * sx + sy * sy
+                if schooling && f.feeding == nil && other.species == f.species && squaredDistance < 0.0225 {
+                    shoalX -= sx; shoalY -= sy; shoalVX += other.vx; shoalVY += other.vy; shoalCount += 1
+                }
                 let spacing = (f.species.bodySize * f.depth + other.size) / 3200 * 0.62
                 if squaredDistance > 0.0000000001 && squaredDistance < spacing * spacing {
                     let distance = sqrt(squaredDistance)
@@ -580,8 +645,13 @@ struct AquariumSimulation {
                     dx += sx / distance * force; dy += sy / distance * force
                 }
             }
+            if shoalCount > 0 {
+                let affinity = f.navigation.shoalAffinity / shoalCount
+                dx += (shoalX + shoalVX * 0.35) * affinity
+                dy += (shoalY + shoalVY * 0.35) * affinity
+            }
             let distance = max(0.001, hypot(dx, dy))
-            let speed = f.species.cruiseSpeed * f.activity * min(1, distance / 0.025)
+            let speed = f.species.cruiseSpeed * f.activity * (f.feeding == nil ? f.navigation.speedFactor : 1) * min(1, distance / 0.025)
             let desiredVX = dx / distance * speed, desiredVY = dy / distance * speed
             let previousSpeed = hypot(f.vx, f.vy)
             let previousYaw = f.yaw
@@ -591,13 +661,17 @@ struct AquariumSimulation {
             // Heading integrates an angle through real front/rear views; it never mirrors the sprite.
             let headingVX = targetFood == nil ? f.vx : desiredVX
             var requestedTurnRate = 0.0
-            if abs(headingVX) > 0.0015 {
-                let targetYaw = (headingVX >= 0 ? 0.0 : Double.pi) + sin(clock * 0.19 + f.phase) * 0.10
+            if abs(headingVX) > 0.0015 && abs(headingVX) / max(0.003, hypot(f.vx, f.vy * 0.45)) > 0.25 {
+                let targetYaw = (headingVX >= 0 ? 0.0 : Double.pi) + (f.feeding == nil ? f.navigation.viewAngle : 0)
                 let difference = Self.angleDifference(targetYaw, f.yaw)
-                requestedTurnRate = max(-1.8, min(1.8, difference * 2.5))
+                let turnLimit = f.feeding == nil ? f.navigation.turnLimit : 1.8
+                requestedTurnRate = max(-turnLimit, min(turnLimit, difference * 2.5))
             }
             f.yawVelocity += (requestedTurnRate - f.yawVelocity) * (1 - exp(-movement * 10))
             f.yaw += f.yawVelocity * movement
+            let pitchLimit = f.species == .loach ? 0.35 : 0.90
+            let pitchTarget = max(-pitchLimit, min(pitchLimit, atan2(f.vy * 0.45, max(0.003, abs(f.vx)))))
+            f.pitch += (pitchTarget - f.pitch) * (1 - exp(-movement * 3.0))
             let alignment = abs(cos(f.yaw))
             f.x += f.vx * movement * (0.28 + 0.72 * alignment)
             f.y += f.vy * movement
@@ -612,7 +686,7 @@ struct AquariumSimulation {
                hypot(pellet.x-mouthX, (pellet.y-f.y)*0.55) < 0.016 {
                 food.removeAll { $0.id == targetFood }; mealsEaten += 1
                 f.appetite = max(0, f.appetite - 0.7)
-                f.feeding = FeedingResponse(phase: .nibbling, targetID: nil, x: f.x, y: f.y, remaining: random.value(0.65...1.0))
+                f.feeding = FeedingResponse(phase: .nibbling, targetID: nil, x: f.x, y: f.y, remaining: f.behaviorRandom.value(0.65...1.0))
             }
             fish[i] = f
         }

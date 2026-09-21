@@ -106,6 +106,45 @@ import CoreGraphics
         }
         require(moods.isSuperset(of: [.hover, .cruise, .dash, .forage]), "Individuals must exhibit all natural moods")
         require(turns > 10, "Turns must pass through front/rear angles")
+        var wanderer = FishNavigation(seed: 231, heading: 0), repeatWanderer = FishNavigation(seed: 231, heading: 0)
+        var otherWanderer = FishNavigation(seed: 902, heading: 0)
+        let openWater = SwimRegion(left: 0, right: 1, bottom: 0, top: 1)
+        var shortTurns = 0, wideTurns = 0, reversals = 0, leftTurns = 0, rightTurns = 0
+        var paces: [Double] = [], turnRates: [Double] = [], intervals: [Double] = []
+        for _ in 0..<36000 {
+            let before = wanderer.decisions
+            wanderer.advance(delta: 1.0 / 30, x: 0.5, y: 0.5, region: openWater, resting: false)
+            // Consuming another individual's stream must not change this fish's choices.
+            for _ in 0..<3 { otherWanderer.advance(delta: 1.0 / 30, x: 0.5, y: 0.5, region: openWater, resting: false) }
+            repeatWanderer.advance(delta: 1.0 / 30, x: 0.5, y: 0.5, region: openWater, resting: false)
+            require(wanderer.heading == repeatWanderer.heading && wanderer.remaining == repeatWanderer.remaining, "Fish navigation random streams must be independent")
+            if wanderer.decisions != before {
+                let angle = abs(wanderer.lastTurn)
+                require(angle <= .pi, "An intention chooses a partial turn or reversal, never a full circle")
+                if angle < .pi / 4 { shortTurns += 1 }
+                else if angle < 2.4 { wideTurns += 1 }
+                else { reversals += 1 }
+                if wanderer.lastTurn < 0 { leftTurns += 1 } else { rightTurns += 1 }
+                paces.append(wanderer.speedFactor); turnRates.append(wanderer.turnLimit); intervals.append(wanderer.remaining)
+            }
+        }
+        require(shortTurns > wideTurns && wideTurns > reversals && reversals > 15, "Navigation must mix small changes, wider turns, and occasional reversals")
+        require(leftTurns > 100 && rightTurns > 100, "Fish must turn in both directions")
+        require(paces.max()! / paces.min()! > 2 && turnRates.max()! / turnRates.min()! > 2 && intervals.max()! / intervals.min()! > 3, "Fish need varied swimming speed, turning speed, and decision timing")
+        let restingHeading = wanderer.heading
+        for _ in 0..<300 { wanderer.advance(delta: 1.0 / 30, x: 0.5, y: 0.5, region: openWater, resting: true) }
+        require(wanderer.heading == restingHeading, "Resting must hold an intention instead of repeatedly choosing turns")
+        let frozenNavigation = behavior.fish.map { [$0.navigation.heading, $0.navigation.remaining, Double($0.navigation.decisions), $0.pitch] }
+        var freezeNavigation = natural; freezeNavigation.mode = .still
+        for _ in 0..<120 { behavior.step(delta: 1.0 / 30, configuration: freezeNavigation) }
+        require(behavior.fish.map { [$0.navigation.heading, $0.navigation.remaining, Double($0.navigation.decisions), $0.pitch] } == frozenNavigation, "Still freezes navigation decisions and pitch")
+        var bubbleTwin = AquariumSimulation(seed: 908), noBubbleTwin = AquariumSimulation(seed: 908)
+        var withBubbles = natural; withBubbles.bubbles = true
+        bubbleTwin.synchronize(withBubbles); noBubbleTwin.synchronize(natural)
+        for _ in 0..<1800 { bubbleTwin.step(delta: 1.0 / 30, configuration: withBubbles); noBubbleTwin.step(delta: 1.0 / 30, configuration: natural) }
+        require(bubbleTwin.fish.map { [$0.x,$0.y,$0.yaw] } == noBubbleTwin.fish.map { [$0.x,$0.y,$0.yaw] }, "Bubble randomness must not affect fish choices")
+        require(Set(bubbleTwin.bubbles.map(\.randomState)).count == bubbleTwin.bubbles.count, "Every bubble must own its random stream")
+        print("PASS: independent random navigation, partial turns and reversals, varied timing/speed, rest and Still freeze")
         // Hold speed constant to detect a short mechanical loop independent of mood changes.
         for species in FishSpecies.allCases {
             var stroke = FishStroke(seed: 91), twin = FishStroke(seed: 91), neighbor = FishStroke(seed: 193)

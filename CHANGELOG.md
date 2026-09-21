@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 — 2026-09-21
+
+- Replaced shared looping routes with independent, irregular navigation choices: small course changes, wider turns, and occasional reversals.
+- Varied each fish's swimming speed, turning speed, heading, and decision timing. Resting holds a heading, and turns take the shortest angular route.
+- Added eased upward/downward posture and loose local gathering that leaves room for individual wandering.
+- Isolated fish birth, navigation, mood/feeding, and fin random streams. Bubbles retain individual random states across respawns, and pellets receive their own seeded variations.
+- Added checks for turn diversity, independent random streams, resting, and frozen navigation.
+
 ## 1.0.3 — 2026-09-21
 
 - Added individual, smoothly varying tail strokes, glides, balancing fins, and stronger acceleration strokes.

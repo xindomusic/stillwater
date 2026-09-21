@@ -61,11 +61,15 @@ Fish profiles are lazily copied into small, independent texture buffers; the sev
 
 ## Simulation details
 
-Fish and scenery share an image-space transform, with the sand anchored to the bottom across aspect ratios. Each fish keeps an identity, velocity, continuous turn angle, mood, fin phase, appetite, and temporary feeding response. Still mode returns before advancing any simulation clock.
+Fish and scenery share an image-space transform, with the sand anchored to the bottom across aspect ratios. Each fish keeps an identity, velocity, continuous turn angle, pitch, mood, fin phase, appetite, and temporary feeding response. Still mode returns before advancing any simulation clock.
+
+Each fish owns separate seeded streams for birth, navigation, motor rhythms, and mood/feeding responses. Navigation decisions arrive at irregular intervals: most change the heading by 10–45 degrees, some by 45–100 degrees, and a minority by 140–180 degrees, with either sign. Speed, maximum turn rate, viewing angle, and interest in nearby schoolmates also vary. Velocity and posture ease toward these intentions. Resting holds the current intention; feeding temporarily takes over steering. Soft edge anticipation keeps fish in their swimming regions. There is no shared sinusoidal route or command to rotate a full circle.
+
+Rasboras and barbs can gently follow nearby companions through local position/velocity influence, using the same reusable neighbor buffer as separation. Their individual affinity changes over time, so that influence does not erase their own navigation choices.
 
 Feeding schedules three short sprinkles at changing horizontal locations. Pellets vary in release delay, size, rotation, drift, surface pause, and sinking speed. Pending and visible pellets share a bounded population budget. Each portion spans three distance bands. Pellets use rounded 3D volumes with surface grain and directional shading, tumble while falling, and stop rotating as they settle. Fish notice food at different times, select targets, eat within mouth reach, and return to separate resting locations. Unreachable food is abandoned.
 
-Bubbles have their own deterministic random stream, so enabling them does not change fish decisions. Each bubble has a source, delay, rise speed, drift, size, and lifetime. A respawn selects a different source. Bubbles ease into buoyant rise; larger ones rise faster, with small continuous lateral drift. Their shader adds a clear center, directional reflections, and a darker curved edge. Their distance affects apparent size, rise speed, and contrast. Bubbles and food share the fish depth axis, so far particles pass behind fish and near particles pass in front. All bubbles freeze in Still mode. Bubbles remain independent of the swimming-speed setting.
+Each bubble retains its own deterministic random stream across respawns, so its lifecycle and enabling bubbles do not change fish decisions. Each bubble has a source, delay, rise speed, drift, size, and lifetime. A respawn selects a different source. Bubbles ease into buoyant rise; larger ones rise faster, with small continuous lateral drift. Their shader adds a clear center, directional reflections, and a darker curved edge. Their distance affects apparent size, rise speed, and contrast. Bubbles and food share the fish depth axis, so far particles pass behind fish and near particles pass in front. All bubbles freeze in Still mode. Bubbles remain independent of the swimming-speed setting.
 
 Vegetation and water masks are derived once per scene from the bundled artwork and cached. The background shader bends leaf regions with height above the bed, ripples the upper water surface, and moves light across sand and stones. The existing Plant sway and Water movement sliders independently control these effects. Night reduces light intensity, and Still freezes the shared clock.
 
@@ -82,7 +86,7 @@ A Developer ID certificate and Apple notarization are not included in the curren
 ## Current limits and future work
 
 - Fish use generated photographic-style views and shader deformation; this is not full 3D geometry.
-- General schooling still uses shared group targets. Richer spontaneous splitting/rejoining and depth-aware swimming remain future work.
+- Schooling uses limited local attraction/alignment and individual wandering. Full three-dimensional schooling and depth-aware swimming remain future work.
 - Scene plants are part of image plates, with localized texture motion.
 - The app has been exercised on the local M4/macOS 27 setup. Other physical displays, Spaces/Stage Manager combinations, and older OS versions need more hands-on testing.
 - Sustained GPU power, thermal, and battery performance are not established by short native test samples.

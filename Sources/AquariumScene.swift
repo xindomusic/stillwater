@@ -183,7 +183,7 @@ final class AquariumScene: SKScene {
                 let envelope = min(1, response.age * 6) * min(1, max(0, response.remaining) * 6)
                 bite = sin(response.age * 18) * 0.045 * envelope
             } else { bite = 0 }
-            node.zRotation = CGFloat((max(-0.27, min(0.27, f.vy * 9)) + bite) * cos(f.yaw))
+            node.zRotation = CGFloat((f.pitch + bite) * cos(f.yaw))
             // Distance changes color, never the opacity of a fish's body.
             if let shadow = fishShadows[f.id] {
                 shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * 0.085)
