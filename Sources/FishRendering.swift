@@ -5,15 +5,52 @@ enum FishRendering {
         let shader = SKShader(source: source ?? shaderSource)
         shader.uniforms = [SKUniform(name: "u_brightness", float: 0.95), SKUniform(name: "u_night", float: 0)]
         shader.attributes = ["a_depth", "a_finPhase", "a_activity", "a_pose", "a_species"].map { SKAttribute(name: $0, type: .float) }
-            + ["a_rect0", "a_rect1"].map { SKAttribute(name: $0, type: .vectorFloat4) }
-            + [SKAttribute(name: "a_sampleScale", type: .vectorFloat2)]
+            + ["a_rect0", "a_rect1", "a_stroke", "a_fins", "a_curve"].map { SKAttribute(name: $0, type: .vectorFloat4) }
+            + ["a_sampleScale", "a_visibleY"].map { SKAttribute(name: $0, type: .vectorFloat2) }
         return shader
     }
     static let shaderSource = """
-        vec2 photoUV(vec3 p, vec2 scale, vec4 rect, float phase, float activity) {
+        // Lateral centerline and its slope: the head leads while the posterior
+        // bends behind it. Polynomial coefficients are prepared once per fish.
+        vec2 spine(float x, vec2 photoScale, vec4 curve) {
+            float u = clamp((0.78 - (x / photoScale.x + 0.5)) / 0.76, 0.0, 1.0);
+            float z = u * u * (curve.x + u * (curve.y + u * curve.z));
+            float slope = -(2.0 * curve.x * u + 3.0 * curve.y * u * u + 4.0 * curve.z * u * u * u) / (0.76 * photoScale.x);
+            return vec2(z, slope);
+        }
+        vec2 photoUV(vec3 p, vec2 scale, vec4 rect, float phase, float species, vec4 stroke, vec4 fins) {
             vec2 uv = p.xy * 0.5 * scale / rect.zw + 0.5;
-            float tail = pow(clamp(1.0 - uv.x, 0.0, 1.0), 1.5);
-            uv.y += sin(phase - uv.x * 6.5) * (0.005 + activity * 0.009) * (0.15 + tail);
+            if (uv.x > 0.83) { return uv; }
+            float loach = step(2.5, species);
+            float posterior = clamp((0.76 - uv.x) / 0.70, 0.0, 1.0);
+            float envelope = pow(posterior, mix(2.2, 1.25, loach));
+            float wave = sin(phase - posterior * mix(3.5, 7.0, loach));
+            float power = stroke.x;
+            // Rear-body flex grows towards the tail; the face stays anchored.
+            uv.y -= envelope * wave * power * mix(0.006, 0.014, loach);
+            // Lateral tail sweep foreshortens the caudal fin around its root.
+            float caudal = 1.0 - smoothstep(0.22, 0.34, uv.x);
+            float sweep = sin(phase - 3.3) * power * 0.72 + stroke.y * 0.28;
+            uv.x = mix(uv.x, 0.29 + (uv.x - 0.29) / max(0.64, cos(sweep)), caudal);
+            float fan = 1.0 + caudal * (sin(phase - 4.0) * power * 0.10 + (fins.z - 0.5) * 0.12);
+            uv.y = 0.49 + (uv.y - 0.49) / fan;
+            // Fin roots remain attached while their outer edges flex on independent rhythms.
+            float finSpan = smoothstep(0.24, 0.37, uv.x) * (1.0 - smoothstep(0.66, 0.81, uv.x));
+            float dorsal = smoothstep(mix(0.57, 0.48, loach), mix(0.75, 0.57, loach), uv.y) * finSpan;
+            float ventral = (1.0 - smoothstep(mix(0.26, 0.33, loach), mix(0.41, 0.41, loach), uv.y)) * finSpan;
+            if (dorsal + ventral > 0.001) {
+                float dorsalWave = sin(fins.y + uv.x * 8.0);
+                float ventralWave = sin(fins.y * 1.13 - uv.x * 6.0 + 1.7);
+                uv.x += (dorsal * dorsalWave - ventral * ventralWave) * fins.w * 0.018;
+                uv.y += (dorsal * dorsalWave + ventral * ventralWave * 0.65) * fins.w * 0.016;
+            }
+            vec2 shoulder = (uv - vec2(0.69, mix(0.42, 0.43, loach))) / vec2(0.12, 0.13);
+            float pectoral = max(0.0, 1.0 - dot(shoulder, shoulder));
+            if (pectoral > 0.001) {
+                float scull = sin(fins.x) + 0.22 * sin(fins.x * 2.0 + 0.7);
+                uv.x += pectoral * scull * fins.w * 0.014;
+                uv.y += pectoral * cos(fins.x + 0.6) * fins.w * 0.009;
+            }
             return uv;
         }
         vec4 atlasUV(vec2 uv, vec4 rect) {
@@ -21,6 +58,11 @@ enum FishRendering {
             return vec4(rect.xy + clamp(uv, 0.002, 0.998) * rect.zw, inside, 0.0);
         }
         void main() {
+            // Transparent atlas margins need no projection or fin calculations.
+            float photoY = (v_tex_coord.y - 0.5) * a_sampleScale.y / a_rect0.w + 0.5;
+            if (a_visibleY.y > a_visibleY.x && (photoY < a_visibleY.x || photoY > a_visibleY.y)) {
+                gl_FragColor = vec4(0.0);
+            } else {
             // One continuous photographed surface on a curved body and thin fin plane.
             // The angle never chooses a different atlas view.
             float yaw = a_pose * 0.78539816;
@@ -35,27 +77,59 @@ enum FishRendering {
             if (a_species > 1.5 && a_species < 2.5) { centerUV = vec2(0.59,0.50); extentUV = vec2(0.36,0.23); thickness = 0.14; }
             if (a_species > 2.5) { centerUV = vec2(0.54,0.45); extentUV = vec2(0.44,0.077); thickness = 0.075; }
             vec2 photoScale = 2.0 * a_rect0.zw / a_sampleScale;
+            // A quartic Bezier hull bounds the entire curved spine. This also
+            // skips most empty pixels during narrow, head-on views.
+            float spineExtent = max(abs(a_curve.x) / 6.0,
+                max(abs(a_curve.x * 0.5 + a_curve.y * 0.25), abs(a_curve.x + a_curve.y + a_curve.z)));
+            float projectedExtent = abs(c) * photoScale.x * 0.5 + abs(s) * (thickness + spineExtent) + 0.045;
+            if (abs((v_tex_coord.x - 0.5) * 2.0) > projectedExtent) {
+                gl_FragColor = vec4(0.0);
+            } else {
             vec3 center = vec3((centerUV - 0.5) * photoScale, 0.0);
             vec3 radius = vec3(extentUV * photoScale, thickness);
-            vec3 o = (origin - center) / radius, d = ray / radius;
-            float A = dot(d,d), B = dot(o,d), C = dot(o,o) - 1.0;
-            float discriminant = B * B - A * C;
-            float bodyDistance = discriminant >= 0.0 ? (-B - sqrt(max(0.0, discriminant))) / A : 100.0;
-            float finDistance = abs(ray.z) > 0.001 ? -origin.z / ray.z : 100.0;
+            float bodyDistance = 2.0, discriminant = -1.0, A = 1.0;
+            vec2 curve = vec2(0.0);
+            // Two local tangent solves bend the actual projected surface,
+            // including its silhouette, without a per-pixel ray-marching loop.
+            for (int i = 0; i < 2; i++) {
+                float anchor = (origin + ray * min(bodyDistance, 3.0)).x;
+                curve = spine(anchor, photoScale, a_curve);
+                vec3 bentOrigin = origin - vec3(0.0, 0.0, curve.x + curve.y * (origin.x - anchor));
+                vec3 bentRay = ray - vec3(0.0, 0.0, curve.y * ray.x);
+                vec3 o = (bentOrigin - center) / radius, d = bentRay / radius;
+                A = dot(d,d); float B = dot(o,d), C = dot(o,o) - 1.0;
+                discriminant = B * B - A * C;
+                bodyDistance = (-B - sqrt(max(0.0, discriminant))) / A;
+            }
+            float finDistance = abs(ray.z) > 0.06 ? -origin.z / ray.z : bodyDistance;
+            float finIncidence = abs(ray.z);
+            for (int i = 0; i < 3; i++) {
+                vec3 at = origin + ray * finDistance;
+                vec2 bend = spine(at.x, photoScale, a_curve);
+                float derivative = ray.z - bend.y * ray.x;
+                finIncidence = abs(derivative) / sqrt(1.0 + bend.y * bend.y);
+                if (abs(derivative) > 0.025) { finDistance -= clamp((at.z - bend.x) / derivative, -0.6, 0.6); }
+            }
             vec3 finPoint = origin + ray * min(finDistance, 100.0);
-            vec4 finUV = atlasUV(photoUV(finPoint, a_sampleScale, a_rect0, a_finPhase, a_activity), a_rect0);
-            float validFin = step(finDistance, 10.0) * step(0.0, finDistance);
+            vec4 finUV = atlasUV(photoUV(finPoint, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+            // A grazing ray may not converge to the fin surface. Reject that
+            // spurious projection instead of drawing detached duplicate fins.
+            float residual = abs(finPoint.z - spine(finPoint.x, photoScale, a_curve).x);
+            float validFin = step(finDistance, 10.0) * step(0.0, finDistance) * (1.0 - smoothstep(0.003, 0.018, residual));
             // Subpixel fins lose projected coverage smoothly as their plane turns edge-on.
-            float finCoverage = smoothstep(0.0, 0.12, abs(ray.z));
+            float finCoverage = smoothstep(0.025, 0.18, finIncidence);
             vec4 fin = texture2D(u_texture, finUV.xy) * finUV.z * validFin * finCoverage;
             vec3 bodyPoint = origin + ray * min(bodyDistance, 100.0);
-            vec2 bodyPhoto = photoUV(bodyPoint, a_sampleScale, a_rect0, a_finPhase, a_activity);
+            vec2 bodyPhoto = photoUV(bodyPoint, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins);
             vec4 bodyUV = atlasUV(bodyPhoto, a_rect0);
             vec4 body = texture2D(u_texture, bodyUV.xy) * bodyUV.z;
             // Soften subpixel edges of the projected curved body, especially head-on loaches.
-            body *= smoothstep(0.0, 0.14, max(0.0, discriminant) / A);
+            body *= smoothstep(0.0, a_species > 2.5 ? 0.18 : 0.14, max(0.0, discriminant) / A);
             float hasBody = step(0.0, discriminant) * step(0.0, bodyDistance);
-            vec3 normal = normalize(rotation * ((bodyPoint - center) / (radius * radius)));
+            vec2 bodyCurve = spine(bodyPoint.x, photoScale, a_curve);
+            vec3 normal = (bodyPoint - center - vec3(0.0,0.0,bodyCurve.x)) / (radius * radius);
+            normal.x -= bodyCurve.y * normal.z;
+            normal = normalize(rotation * normal);
             float light = 0.78 + 0.24 * max(0.0, dot(normal, normalize(vec3(-0.3,0.6,0.9))));
             body.rgb *= light;
             vec4 color = fin;
@@ -67,6 +141,8 @@ enum FishRendering {
             color.rgb = mix(color.rgb, vec3(0.68,0.76,0.81) * color.a, waterMix);
             color.rgb *= u_brightness * mix(vec3(1.0), vec3(0.40,0.47,0.60), u_night);
             gl_FragColor = color * v_color_mix.a;
+            }
+            }
         }
         """
 }

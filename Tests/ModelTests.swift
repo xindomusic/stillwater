@@ -97,6 +97,7 @@ import CoreGraphics
                 moods.insert(f.mood)
                 let turn = abs(AquariumSimulation.angleDifference(f.yaw, before.yaw))
                 require(turn <= 1.8 / 60 + 0.000001, "Turns must be angularly continuous without an instant flip")
+                require(abs(f.yawVelocity - before.yawVelocity) < 0.6, "Turning must accelerate and decelerate rather than snap to its speed limit")
                 require(abs(f.activity - before.activity) < 0.15, "Moods must ease body activity rather than snap")
                 require(f.finPhase > before.finPhase, "Hovering fish must still breathe and move their fins")
                 if abs(cos(f.yaw)) < 0.25 { turns += 1 }
@@ -105,6 +106,40 @@ import CoreGraphics
         }
         require(moods.isSuperset(of: [.hover, .cruise, .dash, .forage]), "Individuals must exhibit all natural moods")
         require(turns > 10, "Turns must pass through front/rear angles")
+        // Hold speed constant to detect a short mechanical loop independent of mood changes.
+        for species in FishSpecies.allCases {
+            var stroke = FishStroke(seed: 91), twin = FishStroke(seed: 91), neighbor = FishStroke(seed: 193)
+            var rates: [Double] = [], powers: [Double] = []
+            var independentFrames = 0
+            for frame in 0..<3600 {
+                let before = stroke
+                stroke.advance(delta: 1.0 / 60, species: species, speed: 0.85, acceleration: 0, turnRate: 0)
+                twin.advance(delta: 1.0 / 60, species: species, speed: 0.85, acceleration: 0, turnRate: 0)
+                neighbor.advance(delta: 1.0 / 60, species: species, speed: 0.85, acceleration: 0, turnRate: 0)
+                require(stroke.amplitude == twin.amplitude && stroke.pectoralPhase == twin.pectoralPhase, "Motion must remain reproducible for a fixed seed")
+                require(abs(stroke.amplitude - before.amplitude) < 0.055 && abs(stroke.tailRate - before.tailRate) < 0.45, "Random stroke changes must ease without a twitch")
+                require(stroke.pectoralPhase > before.pectoralPhase && stroke.dorsalPhase > before.dorsalPhase, "Balancing fins must advance independently")
+                if abs(stroke.amplitude - neighbor.amplitude) > 0.025 { independentFrames += 1 }
+                if frame > 120 { rates.append(stroke.tailRate); powers.append(stroke.amplitude) }
+            }
+            require(rates.max()! / rates.min()! > 1.25 && powers.max()! / powers.min()! > 1.6, "Steady swimming must vary cadence and include softer glides for \(species)")
+            require(independentFrames > 1800, "Neighboring fish must not share one stroke loop")
+            var hover = FishStroke(seed: 9), dash = FishStroke(seed: 9)
+            for _ in 0..<300 {
+                hover.advance(delta: 1.0 / 60, species: species, speed: 0.03, acceleration: 0, turnRate: 0)
+                dash.advance(delta: 1.0 / 60, species: species, speed: 2.5, acceleration: 0.5, turnRate: 0.7)
+            }
+            require(dash.amplitude > hover.amplitude * 4 && dash.tailRate > hover.tailRate * 2, "Dashing recruits stronger and faster tail strokes")
+            require(hover.finAmplitude > 0.3 && hover.amplitude < 0.10, "Hovering keeps balancing fins alive while the tail rests")
+        }
+        let strokeSnapshot = behavior.fish.map { [$0.stroke.pectoralPhase, $0.stroke.dorsalPhase, $0.stroke.amplitude, $0.stroke.bend] }
+        var stopped = natural; stopped.swimmingSpeed = 0
+        for _ in 0..<120 { behavior.step(delta: 1.0 / 30, configuration: stopped) }
+        require(behavior.fish.map { [$0.stroke.pectoralPhase, $0.stroke.dorsalPhase, $0.stroke.amplitude, $0.stroke.bend] } == strokeSnapshot, "Zero speed freezes all motor rhythms")
+        stopped = natural; stopped.mode = .still
+        for _ in 0..<120 { behavior.step(delta: 1.0 / 30, configuration: stopped) }
+        require(behavior.fish.map { [$0.stroke.pectoralPhase, $0.stroke.dorsalPhase, $0.stroke.amplitude, $0.stroke.bend] } == strokeSnapshot, "Still freezes all motor rhythms")
+        print("PASS: independent non-looping stroke variation, smooth transitions, glides, stronger dashes, and complete motor freeze")
         behavior.feed(natural)
         require(behavior.food.count + behavior.pendingFood.count == 12, "Feeding drops a small portion")
         var fedConfig = natural; fedConfig.mode = .still

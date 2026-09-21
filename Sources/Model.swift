@@ -173,13 +173,85 @@ struct FishState: Identifiable {
     var species: FishSpecies
     var x: Double, y: Double, vx: Double, vy: Double
     var phase: Double, depth: Double, yaw: Double
+    var yawVelocity = 0.0
     var finPhase = 0.0
+    var stroke = FishStroke(seed: 1)
     var activity = 1.0
     var mood: FishMood = .cruise
     var moodRemaining = 6.0
     var appetite = 1.0
     var feeding: FeedingResponse?
     var feedingCooldown = 0.0
+
+    var spineCurve: SIMD4<Float> {
+        stroke.spineCurve(phase: finPhase, species: species)
+    }
+}
+
+/// Independent, smoothly changing motor rhythms; this stream never changes navigation or feeding decisions.
+struct FishStroke {
+    private var random: AquariumRandom
+    private var remaining = 0.0
+    private var cadenceTarget = 1.0
+    private var strengthTarget = 1.0
+    private var finTarget = 1.0
+    private var coasting = false
+    private var cadence = 1.0
+    private var strength = 1.0
+    private var finEnergy = 1.0
+    private(set) var tailRate = 7.0
+    private(set) var amplitude = 0.5
+    private(set) var pectoralPhase: Double
+    private(set) var dorsalPhase: Double
+    private(set) var finAmplitude = 0.5
+    private(set) var spread = 0.5
+    private(set) var bend = 0.0
+
+    init(seed: UInt64) {
+        random = AquariumRandom(state: seed)
+        pectoralPhase = random.value(0...(2 * .pi))
+        dorsalPhase = random.value(0...(2 * .pi))
+        remaining = random.value(0.2...1.4)
+        cadence = random.value(0.85...1.15); cadenceTarget = cadence
+    }
+
+    func spineCurve(phase: Double, species: FishSpecies) -> SIMD4<Float> {
+        let power = amplitude * (species == .loach ? 0.25 : 0.18)
+        let wave = sin(phase), follow = sin(phase - 1.4)
+        return SIMD4(Float(-bend * 0.34 + power * wave),
+            Float(power * (follow - wave) * 1.6), Float(-power * follow * 0.65), 0)
+    }
+
+    mutating func advance(delta: Double, species: FishSpecies, speed: Double, acceleration: Double, turnRate: Double) {
+        guard delta > 0 else { return }
+        remaining -= delta
+        if remaining <= 0 {
+            coasting = !coasting && random.next() < (species == .loach ? 0.20 : 0.48)
+            remaining = coasting ? random.value(0.35...1.15) : random.value(0.65...2.6)
+            cadenceTarget = random.value(0.78...1.22)
+            strengthTarget = coasting ? random.value(0.12...0.28) : random.value(0.75...1.15)
+            finTarget = random.value(0.65...1.25)
+        }
+        let ease = 1 - exp(-delta * 3.8)
+        cadence += (cadenceTarget - cadence) * ease
+        strength += (strengthTarget - strength) * ease
+        finEnergy += (finTarget - finEnergy) * ease
+        // Acceleration and steering recruit strokes even during a planned glide.
+        let effort = min(1, max(0, acceleration) * 0.32 + abs(turnRate) * 0.23 + max(0, speed - 1.1) * 0.55)
+        let drive = max(strength, effort)
+        let speciesRate: Double = species == .pearl ? 0.70 : (species == .loach ? 0.82 : 1)
+        let rate = (2.1 + min(2.5, speed) * 6.3) * speciesRate * cadence * (0.48 + drive * 0.52)
+        tailRate += (rate - tailRate) * ease
+        let power = min(1.25, (0.06 + min(2.5, speed) * 0.44 + effort * 0.23) * drive)
+        amplitude += (power - amplitude) * ease
+        // Hovering uses gentle balancing fins even while the tail nearly rests.
+        let balance = min(1.15, (0.48 + 0.30 / (1 + speed) + abs(turnRate) * 0.15) * finEnergy)
+        finAmplitude += (balance - finAmplitude) * ease
+        pectoralPhase += delta * (5.1 + speed * 1.7) * (0.75 + finEnergy * 0.25)
+        dorsalPhase += delta * (2.3 + speed * 1.1) * (1.18 - cadence * 0.18)
+        spread += (min(1, 0.28 + balance * 0.52 + effort * 0.16) - spread) * ease
+        bend += (max(-0.85, min(0.85, turnRate * 0.38)) - bend) * ease
+    }
 }
 
 struct FoodPellet: Identifiable {
@@ -232,6 +304,7 @@ struct AquariumSimulation {
     private var random: AquariumRandom
     private var nextID = 0
     private var nextFoodID = 0
+    private var neighbors: [(id: Int, x: Double, y: Double, size: Double)] = []
     private var theme: AquariumTheme?
     var visibleRegion = SwimRegion(left: 0, right: 1, bottom: 0, top: 1)
     init(seed: UInt64 = 42017) {
@@ -279,6 +352,7 @@ struct AquariumSimulation {
                     x: random.value(r.left...r.right), y: random.value(r.bottom...r.top),
                     vx: direction * species.cruiseSpeed, vy: 0,
                     phase: random.value(0...(2 * .pi)), depth: random.value(0.70...1.15), yaw: direction > 0 ? 0 : .pi, finPhase: random.value(0...6), moodRemaining: random.value(1...10)))
+                fish[fish.count - 1].stroke = FishStroke(seed: appearanceRandom.state ^ (UInt64(nextID) &* 0x9E3779B97F4A7C15))
                 nextID += 1
             }
         }
@@ -399,7 +473,8 @@ struct AquariumSimulation {
             food[i].tumble += food[i].tumbleSpeed * dt * settling
         }
         food.removeAll { $0.age > 70 || $0.x < visibleRegion.left || $0.x > visibleRegion.right }
-        let previous = fish
+        neighbors.removeAll(keepingCapacity: true)
+        for f in fish { neighbors.append((f.id, f.x, f.y, f.species.bodySize * f.depth)) }
         for i in fish.indices {
             var f = fish[i]
             let home = Self.region(for: f.species, theme: configuration.theme).intersecting(visibleRegion)
@@ -426,16 +501,16 @@ struct AquariumSimulation {
             var ty = schooling ? cy + sin(f.phase) * 0.07 : (r.bottom + r.top) / 2 + cos(clock * 0.13 + f.phase) * (r.top - r.bottom) * 0.39
             if f.feeding == nil && f.feedingCooldown <= 0 && f.appetite > 0.35 {
                 let awareness = f.species == .loach ? 0.13 : 0.36
-                let candidates = food.filter { pellet in
-                    pellet.x >= home.left && pellet.x <= home.right &&
-                    pellet.y >= (f.species == .loach ? home.bottom : 0.20) &&
-                    hypot(pellet.x - f.x, (pellet.y - f.y) * 0.55) < awareness
+                var closest: FoodPellet?
+                var bestScore = Double.infinity
+                for pellet in food where pellet.x >= home.left && pellet.x <= home.right && pellet.y >= (f.species == .loach ? home.bottom : 0.20) {
+                    let distance = hypot(pellet.x - f.x, (pellet.y - f.y) * 0.55)
+                    guard distance < awareness else { continue }
+                    let claimants = fish.reduce(0) { $0 + (($1.id != f.id && $1.feeding?.targetID == pellet.id) ? 1 : 0) }
+                    let score = distance + Double(claimants) * 0.045
+                    if score < bestScore { bestScore = score; closest = pellet }
                 }
-                func score(_ pellet: FoodPellet) -> Double {
-                    let claimants = fish.filter { $0.id != f.id && $0.feeding?.targetID == pellet.id }.count
-                    return hypot(pellet.x-f.x, (pellet.y-f.y)*0.55) + Double(claimants) * 0.045
-                }
-                if let pellet = candidates.min(by: { score($0) < score($1) }) {
+                if let pellet = closest {
                     f.feeding = FeedingResponse(targetID: pellet.id, x: pellet.x, y: pellet.y,
                         remaining: random.value(0.15...0.95) + hypot(pellet.x-f.x, (pellet.y-f.y)*0.55) * 1.5)
                 }
@@ -495,11 +570,12 @@ struct AquariumSimulation {
             }
             f.activity += (desiredActivity - f.activity) * (1 - exp(-movement * 3.5))
             var dx = tx - f.x, dy = (ty - f.y) * 0.65
-            for other in previous where other.id != f.id {
+            for other in neighbors where other.id != f.id {
                 let sx = f.x - other.x, sy = (f.y - other.y) * 0.65
-                let distance = hypot(sx, sy)
-                let spacing = (f.species.bodySize * f.depth + other.species.bodySize * other.depth) / 3200 * 0.62
-                if distance > 0.00001 && distance < spacing {
+                let squaredDistance = sx * sx + sy * sy
+                let spacing = (f.species.bodySize * f.depth + other.size) / 3200 * 0.62
+                if squaredDistance > 0.0000000001 && squaredDistance < spacing * spacing {
+                    let distance = sqrt(squaredDistance)
                     let force = (1 - distance / spacing) * (f.feeding == nil ? 0.11 : 0.035)
                     dx += sx / distance * force; dy += sy / distance * force
                 }
@@ -507,22 +583,30 @@ struct AquariumSimulation {
             let distance = max(0.001, hypot(dx, dy))
             let speed = f.species.cruiseSpeed * f.activity * min(1, distance / 0.025)
             let desiredVX = dx / distance * speed, desiredVY = dy / distance * speed
+            let previousSpeed = hypot(f.vx, f.vy)
+            let previousYaw = f.yaw
             let response = 1 - exp(-movement * (targetFood == nil ? 1.8 : 3.2))
             f.vx += (desiredVX - f.vx) * response
             f.vy += (desiredVY - f.vy) * response
             // Heading integrates an angle through real front/rear views; it never mirrors the sprite.
             let headingVX = targetFood == nil ? f.vx : desiredVX
+            var requestedTurnRate = 0.0
             if abs(headingVX) > 0.0015 {
                 let targetYaw = (headingVX >= 0 ? 0.0 : Double.pi) + sin(clock * 0.19 + f.phase) * 0.10
                 let difference = Self.angleDifference(targetYaw, f.yaw)
-                let turn = max(-movement * 1.8, min(movement * 1.8, difference * (1 - exp(-movement * 3))))
-                f.yaw += turn
+                requestedTurnRate = max(-1.8, min(1.8, difference * 2.5))
             }
+            f.yawVelocity += (requestedTurnRate - f.yawVelocity) * (1 - exp(-movement * 10))
+            f.yaw += f.yawVelocity * movement
             let alignment = abs(cos(f.yaw))
             f.x += f.vx * movement * (0.28 + 0.72 * alignment)
             f.y += f.vy * movement
             (f.x, f.y) = r.constrain(x: f.x, y: f.y)
-            f.finPhase += movement * (2.2 + f.activity * 7.5)
+            let actualSpeed = hypot(f.vx, f.vy)
+            f.stroke.advance(delta: movement, species: f.species, speed: actualSpeed / f.species.cruiseSpeed,
+                acceleration: (actualSpeed - previousSpeed) / (movement * f.species.cruiseSpeed),
+                turnRate: Self.angleDifference(f.yaw, previousYaw) / movement)
+            f.finPhase += movement * f.stroke.tailRate
             let mouthX = f.x + cos(f.yaw) * f.species.bodySize * f.depth / 2300 * 0.35
             if let targetFood, let pellet = food.first(where: { $0.id == targetFood }),
                hypot(pellet.x-mouthX, (pellet.y-f.y)*0.55) < 0.016 {

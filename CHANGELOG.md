@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 — 2026-09-21
+
+- Added individual, smoothly varying tail strokes, glides, balancing fins, and stronger acceleration strokes.
+- Made the head lead through eased turns while the body bends and the tail follows along a curved spine.
+- Reduced retained fish textures to the profile actually displayed, shared the current scene texture, and reused per-fish shader values.
+- Removed hidden-particle updates, full fish-state copies for separation, and temporary arrays during food selection.
+- Added independent-fin and face-stability rendering checks, motor-variation tests, and a reproducible CPU/memory/frame-rate probe.
+
 ## 1.0.2 — 2026-09-21
 
 - Added near, middle, and far distances for bubbles and food, with perspective size, water contrast, and correct overlap with fish.

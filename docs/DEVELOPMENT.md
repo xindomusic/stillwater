@@ -47,9 +47,17 @@ These render real SpriteKit shader output. A red/blue fixture detects accidental
 
 ### Continuous fish turns
 
-The fish renderer projects one photographic profile onto a curved body with thin fin surfaces. A continuous heading rotates that surface in space; it never selects or dissolves between different pose photographs. The body preserves width when viewed head-on, while the fins lose projected coverage smoothly as they turn edge-on. Body and fin texture deformation follows the swimming phase. This is a lightweight photographic proxy, not a complete anatomical 3D model.
+The fish renderer projects one photographic profile onto a curved body with thin fin surfaces. A continuous heading rotates that surface in space; it never selects or dissolves between different pose photographs. The head leads an eased turn while a lateral spine curve bends the body and delays the tail. Two local tangent solves project that bent surface without a long ray-marching loop. The body preserves width when viewed head-on, while fin coverage follows each fin surface's local angle. This is a lightweight photographic proxy, not a complete anatomical 3D model.
+
+Each fish has a separate deterministic motor stream. Stroke strength and cadence ease between irregular swimming and gliding intervals, while acceleration and steering recruit stronger strokes. Pectoral and dorsal/anal motion have separate phases; fin roots and the face stay anchored. Gouramis have a slower cadence, and loaches have more distributed body flex. These are artistic tunings, not measured kinematics of the four species. General inspiration includes experimental work on [speed-dependent fin recruitment](https://journals.biologists.com/jeb/article/211/4/587/18045/Speed-dependent-intrinsic-caudal-fin-muscle) and [coordination of fins during turns](https://journals.biologists.com/jeb/article/204/17/2943/32831/Locomotor-function-of-the-dorsal-fin-in-teleost).
 
 Native rendering tests compare closely spaced frames around every former pose boundary, the head-on and rear views, and the full-turn wrap. They also check that unrelated source colors are never blended into a double exposure.
+
+### Runtime efficiency
+
+Fish profiles are lazily copied into small, independent texture buffers; the seven unused views in each source atlas are released after decoding. Desktop and preview surfaces share the current scene texture. Per-fish shader attribute objects and separation-position storage are reused, constant sizes and UV rectangles are set outside the frame loop, and hidden atmosphere nodes skip positioning. Food targeting uses a single pass without temporary candidate arrays. Still, hidden windows, and sleep retain their existing render-loop pause behavior.
+
+`zsh tools/benchmark.sh build/performance.json` runs a controlled probe with two visible production surfaces. It reports physical memory footprint, CPU time, frame count, and retained fish texture bytes at default and maximum populations. Run comparisons sequentially on the same machine with similar background load. This short probe does not measure sustained battery use or GPU energy.
 
 ## Simulation details
 

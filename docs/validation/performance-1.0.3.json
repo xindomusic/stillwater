@@ -1,0 +1,115 @@
+{
+  "machine": "Apple M4, macOS 27.0",
+  "baselineTag": "v1.0.2",
+  "samplesPerVersion": 2,
+  "runs": {
+    "1.0.2": [
+      {
+        "fishTextureRGBABytes": 25176608,
+        "samples": [
+          {
+            "cpuPercentOfOneCore": 11.506762001053765,
+            "fps": 25.9176647983088,
+            "physicalFootprintMiB": 197.21971130371094,
+            "scenario": "default-30"
+          },
+          {
+            "cpuPercentOfOneCore": 20.45522411705173,
+            "fps": 26.410362130505067,
+            "physicalFootprintMiB": 198.93846130371094,
+            "scenario": "maximum-30"
+          },
+          {
+            "cpuPercentOfOneCore": 36.71860462354582,
+            "fps": 55.80373022947508,
+            "physicalFootprintMiB": 179.81346130371094,
+            "scenario": "maximum-60"
+          }
+        ],
+        "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+        "stillCPUPercentOfOneCore": 0.6592500000000001,
+        "stillFrames": 0
+      },
+      {
+        "fishTextureRGBABytes": 25176608,
+        "samples": [
+          {
+            "cpuPercentOfOneCore": 12.574695316927706,
+            "fps": 26.931490589545604,
+            "physicalFootprintMiB": 197.00093841552734,
+            "scenario": "default-30"
+          },
+          {
+            "cpuPercentOfOneCore": 20.675892342955883,
+            "fps": 26.267873791854015,
+            "physicalFootprintMiB": 198.76656341552734,
+            "scenario": "maximum-30"
+          },
+          {
+            "cpuPercentOfOneCore": 38.05100989089381,
+            "fps": 52.2869243304113,
+            "physicalFootprintMiB": 179.56343841552734,
+            "scenario": "maximum-60"
+          }
+        ],
+        "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+        "stillCPUPercentOfOneCore": 0.6561500000000109,
+        "stillFrames": 0
+      }
+    ],
+    "1.0.3": [
+      {
+        "fishTextureRGBABytes": 3971136,
+        "samples": [
+          {
+            "cpuPercentOfOneCore": 11.682367944441523,
+            "fps": 25.999854472853507,
+            "physicalFootprintMiB": 138.95399475097656,
+            "scenario": "default-30"
+          },
+          {
+            "cpuPercentOfOneCore": 18.913248565408498,
+            "fps": 28.42045627423593,
+            "physicalFootprintMiB": 141.42274475097656,
+            "scenario": "maximum-30"
+          },
+          {
+            "cpuPercentOfOneCore": 26.426092699223368,
+            "fps": 56.250692472345456,
+            "physicalFootprintMiB": 141.45399475097656,
+            "scenario": "maximum-60"
+          }
+        ],
+        "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+        "stillCPUPercentOfOneCore": 0.6159499999999873,
+        "stillFrames": 0
+      },
+      {
+        "fishTextureRGBABytes": 3971136,
+        "samples": [
+          {
+            "cpuPercentOfOneCore": 13.127802972274086,
+            "fps": 29.90017101155938,
+            "physicalFootprintMiB": 136.62589263916016,
+            "scenario": "default-30"
+          },
+          {
+            "cpuPercentOfOneCore": 24.61602242281206,
+            "fps": 29.945204020008408,
+            "physicalFootprintMiB": 138.34464263916016,
+            "scenario": "maximum-30"
+          },
+          {
+            "cpuPercentOfOneCore": 39.81439739529504,
+            "fps": 58.432607726182816,
+            "physicalFootprintMiB": 148.70401763916016,
+            "scenario": "maximum-60"
+          }
+        ],
+        "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+        "stillCPUPercentOfOneCore": 0.6928000000000267,
+        "stillFrames": 0
+      }
+    ]
+  }
+}
