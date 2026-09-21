@@ -1,4 +1,4 @@
-# Stillwater 1.0.0 validation
+# Stillwater 1.0.1 validation
 
 Validated September 20, 2026 on an Apple M4, macOS 27.0, with one 3440×1440 display. The app targets Apple Silicon and macOS 14+. Older supported macOS versions have not been tested locally.
 
@@ -14,6 +14,19 @@ Validated September 20, 2026 on an Apple M4, macOS 27.0, with one 3440×1440 dis
 - Bubble origins changing on respawn, distribution across the water, and bubble movement independent of fish swimming speed.
 - Complete Still freezing of fish, fins, turns, reaction timers, visible and pending food, and bubbles.
 
+## Native shader regression checks
+
+`zsh tools/test-rendering.sh` passes using SpriteKit in a logged-in graphics session:
+
+- A red/blue source-view fixture stays a single source color through five turn-transition samples. It detects the old double-exposure blending path.
+- Enlarged mid-turn captures cover all eight transitions for each of the four species. Bodies now remain solid; fin transparency comes from the original artwork.
+- Each of the three scenes visibly changes with Plant sway enabled alone and Water movement enabled alone.
+- Setting both controls to zero produces identical renders across time.
+- Still mode produces identical renders after attempted advancement with atmosphere controls enabled.
+- Bubble material captures show directional highlights and a clear center. Model tests additionally verify monotonically rising bubbles without position jumps at detachment.
+
+These are rendering checks, not measurements of a physical display's pixel response or overdrive. Hardware trailing can have a separate cause. The turn renderer fixes a double image reproduced in captured app frames.
+
 ## Native application checks
 
 The [release review report](docs/validation/release-report.json) records the following passing checks through the production renderer and control paths:
@@ -27,11 +40,11 @@ The [release review report](docs/validation/release-report.json) records the fol
 - The desktop window appears in WindowServer, sits below desktop icons, ignores mouse events, cannot become key, and is configured for all Spaces.
 - Synthetic display sleep/wake notifications pause and resume rendering.
 
-A development instance already owned the global feeding shortcut during the final run, so that run covered the registration-conflict fallback. An [earlier pre-release check](docs/validation/shortcut-pre-release-report.json) successfully registered, dispatched through the Carbon handler, unregistered, and re-registered the same shortcut implementation. These checks did not inject a physical key press while another app was active.
+Another installed instance already owned the global feeding shortcut during the final run, so that run covered the registration-conflict fallback. An [earlier pre-release check](docs/validation/shortcut-pre-release-report.json) successfully registered, dispatched through the Carbon handler, unregistered, and re-registered the same shortcut implementation. These checks did not inject a physical key press while another app was active.
 
 ## Short performance sample
 
-The final review measured **28.27 fps** in the live preview, **13.38% of one CPU core** while live, and **0.61% of one core** while still, with **zero still animation frames**. Each mode was sampled for three seconds with a visible 1120×630 preview plus the production desktop window. These are diagnostic samples, not sustained GPU, thermal, or battery benchmarks.
+The final review measured **29.20 fps** in the live preview, **11.77% of one CPU core** while live, and **0.43% of one core** while still, with **zero still animation frames**. Each mode was sampled for three seconds with a visible 1120×630 preview plus the production desktop window. These are diagnostic samples, not sustained GPU, thermal, or battery benchmarks.
 
 ## Images and limits
 

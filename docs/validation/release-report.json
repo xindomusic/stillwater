@@ -44,9 +44,9 @@
     "productionFeedAction" : true,
     "sampleContext" : "Review process with production desktop windows and a visible 1120x630 preview; not a sustained power benchmark",
     "sampleDurationSecondsPerMode" : 3,
-    "sampleLiveCPUPercentOfOneCore" : 13.383018936087446,
-    "sampleLivePreviewFPS" : 28.27081632281185,
-    "sampleStillCPUPercentOfOneCore" : 0.61144241437827829,
+    "sampleLiveCPUPercentOfOneCore" : 11.767009013549128,
+    "sampleLivePreviewFPS" : 29.203987997973663,
+    "sampleStillCPUPercentOfOneCore" : 0.4330624687987108,
     "sceneAndPopulationChangeWhileStill" : true,
     "shortcutTestScope" : "Real OS shortcut registration and dispatch through its Carbon handler; no synthetic system key presses or input monitoring",
     "stillFramesRenderedDuringSample" : 0,
@@ -56,17 +56,17 @@
   "result" : "passed",
   "scenes" : [
     {
-      "bytes" : 2696086,
+      "bytes" : 2701248,
       "fish" : 26,
       "theme" : "sunken-grove"
     },
     {
-      "bytes" : 2579636,
+      "bytes" : 2580579,
       "fish" : 26,
       "theme" : "riverlight"
     },
     {
-      "bytes" : 2933641,
+      "bytes" : 2938881,
       "fish" : 26,
       "theme" : "willow-springs"
     }

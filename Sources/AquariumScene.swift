@@ -12,71 +12,21 @@ final class AquariumScene: SKScene {
     private var fishShadows: [Int: SKSpriteNode] = [:]
     private var framing: AquariumFraming?
     private var motes: [SKShapeNode] = []
-    private var bubbleNodes: [SKShapeNode] = []
+    private var bubbleNodes: [SKSpriteNode] = []
     private var previousTime: TimeInterval?
     private(set) var nightAmount = 0.0
     private(set) var systemIsDark = false
     private var nightTarget = 0.0
-    private let backgroundShader = SKShader(source: """
-        void main() {
-            vec2 uv = v_tex_coord;
-            float edge = smoothstep(0.15, 0.47, abs(uv.x - 0.5));
-            float vegetation = edge * (1.0 - smoothstep(0.48, 0.91, uv.y));
-            uv.x += sin(u_clock * 0.85 + uv.y * 16.0 + uv.x * 7.0) * 0.0018 * u_sway * vegetation;
-            uv.y += sin(u_clock * 0.52 + uv.x * 17.0) * 0.0008 * u_sway * vegetation;
-            vec4 color = texture2D(u_texture, clamp(uv, 0.001, 0.999));
-            float waterLight = sin(uv.x * 34.0 + uv.y * 21.0 + u_clock * 0.4) * sin(uv.x * 13.0 - uv.y * 9.0 - u_clock * 0.3);
-            float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-            vec3 moonlight = mix(color.rgb, vec3(luminance), 0.32) * vec3(0.31, 0.39, 0.51);
-            color.rgb = mix(color.rgb, moonlight, u_night);
-            color.rgb *= u_brightness * (1.0 + waterLight * 0.035 * u_shimmer * (1.0 - u_night * 0.55));
-            gl_FragColor = color;
-        }
-        """)
-    private let fishShader = SKShader(source: """
-        vec3 fishUV(vec2 point, vec4 rect, float pose, float activity, float finPhase, vec2 sampleScale) {
-            float direction = cos(pose * 0.78539816);
-            float longitudinal = mix(1.0 - point.x, point.x, smoothstep(-0.2, 0.2, direction));
-            float tail = pow(1.0 - longitudinal, 1.5);
-            float sideView = abs(direction);
-            float flex = (0.006 + activity * 0.011) * sideView;
-            // A traveling wave bends the trunk before reaching the tail; the head stays steady.
-            point.y += sin(finPhase - longitudinal * 6.5) * flex * (0.15 + tail);
-            float fin = smoothstep(0.075, 0.27, abs(point.y - 0.5));
-            point.x += sin(finPhase * 1.6 + point.y * 12.0) * 0.007 * fin;
-            point.y += sin(finPhase * 0.37) * 0.002 * (1.0 - tail);
-            vec2 samplePoint = rect.xy + rect.zw * 0.5 + (point - 0.5) * sampleScale;
-            float inside = step(rect.x, samplePoint.x) * step(samplePoint.x, rect.x + rect.z)
-                         * step(rect.y, samplePoint.y) * step(samplePoint.y, rect.y + rect.w);
-            return vec3(clamp(samplePoint, rect.xy + 0.0006, rect.xy + rect.zw - 0.0006), inside);
-        }
-        void main() {
-            vec2 uv = v_tex_coord;
-            float pose = floor(a_pose);
-            float blend = smoothstep(0.0, 1.0, fract(a_pose));
-            float silhouetteWidth = mix(a_rect0.z, a_rect1.z, blend);
-            vec2 uv0 = vec2((uv.x - 0.5) * a_rect0.z / silhouetteWidth + 0.5, uv.y);
-            vec2 uv1 = vec2((uv.x - 0.5) * a_rect1.z / silhouetteWidth + 0.5, uv.y);
-            vec3 point0 = fishUV(uv0, a_rect0, pose, a_activity, a_finPhase, a_sampleScale);
-            vec3 point1 = fishUV(uv1, a_rect1, pose + 1.0, a_activity, a_finPhase, a_sampleScale);
-            vec4 color = mix(texture2D(u_texture, point0.xy) * point0.z, texture2D(u_texture, point1.xy) * point1.z, blend);
-            float waterMix = 0.025 + (1.15 - a_depth) * 0.065;
-            color.rgb = mix(color.rgb, vec3(0.68, 0.76, 0.81) * color.a, waterMix);
-            color.rgb *= u_brightness * mix(vec3(1.0), vec3(0.40, 0.47, 0.60), u_night);
-            gl_FragColor = color * v_color_mix.a;
-        }
-        """)
+    private let backgroundShader = SKShader(source: WaterRendering.shaderSource)
+    private let fishShader = FishRendering.makeShader()
+    private let bubbleShader = BubbleRendering.makeShader()
 
     init(size: CGSize, configuration: AquariumConfiguration) {
         self.configuration = configuration
         super.init(size: size)
         scaleMode = .resizeFill
         backgroundColor = NSColor(rgb: 0x101722)
-        backgroundShader.uniforms = [SKUniform(name: "u_clock", float: 0), SKUniform(name: "u_sway", float: 0.55), SKUniform(name: "u_shimmer", float: 0.35), SKUniform(name: "u_brightness", float: 1), SKUniform(name: "u_night", float: 0)]
-        fishShader.uniforms = [SKUniform(name: "u_brightness", float: 0.95), SKUniform(name: "u_night", float: 0)]
-        fishShader.attributes = ["a_depth", "a_finPhase", "a_activity", "a_pose"].map { SKAttribute(name: $0, type: .float) }
-            + ["a_rect0", "a_rect1"].map { SKAttribute(name: $0, type: .vectorFloat4) }
-            + [SKAttribute(name: "a_sampleScale", type: .vectorFloat2)]
+        backgroundShader.uniforms = [SKUniform(name: "u_clock", float: 0), SKUniform(name: "u_sway", float: 0.55), SKUniform(name: "u_shimmer", float: 0.35), SKUniform(name: "u_brightness", float: 1), SKUniform(name: "u_night", float: 0), SKUniform(name: "u_regions", texture: Artwork.motionRegions(configuration.theme))]
         backdrop.shader = backgroundShader
         backdrop.zPosition = -100
         addChild(backdrop)
@@ -91,10 +41,8 @@ final class AquariumScene: SKScene {
             addChild(dot); motes.append(dot)
         }
         for _ in 0..<14 {
-            let bubble = SKShapeNode(circleOfRadius: 1)
-            bubble.fillColor = NSColor.white.withAlphaComponent(0.025)
-            bubble.strokeColor = NSColor.white.withAlphaComponent(0.24)
-            bubble.lineWidth = 0.65
+            let bubble = SKSpriteNode()
+            bubble.shader = bubbleShader
             bubble.zPosition = 20
             addChild(bubble); bubbleNodes.append(bubble)
         }
@@ -119,11 +67,17 @@ final class AquariumScene: SKScene {
         let changedScene = next.theme != configuration.theme || force
         configuration = next
         resolveLighting(immediate: force)
-        if changedScene { backdrop.texture = SKTexture(image: Artwork.image(next.theme)); layoutBackdrop() }
+        if changedScene {
+            backdrop.texture = SKTexture(image: Artwork.image(next.theme))
+            backgroundShader.uniformNamed("u_regions")?.textureValue = Artwork.motionRegions(next.theme)
+            bubbleNodes.forEach { $0.texture = backdrop.texture }
+            layoutBackdrop()
+        }
         backgroundShader.uniformNamed("u_sway")?.floatValue = Float(next.plantSway)
         backgroundShader.uniformNamed("u_shimmer")?.floatValue = Float(next.shimmer)
         backgroundShader.uniformNamed("u_brightness")?.floatValue = Float(next.brightness)
         fishShader.uniformNamed("u_brightness")?.floatValue = Float(min(1.15, next.brightness) * 0.95)
+        bubbleShader.uniformNamed("u_brightness")?.floatValue = Float(next.brightness)
         simulation.synchronize(next)
         let liveIDs = Set(simulation.fish.map(\.id))
         for id in Array(fishNodes.keys) where !liveIDs.contains(id) {
@@ -134,6 +88,7 @@ final class AquariumScene: SKScene {
             let node = SKSpriteNode(texture: Artwork.fishTexture(fish.species))
             node.shader = fishShader
             node.setValue(SKAttributeValue(float: Float(fish.depth)), forAttribute: "a_depth")
+            node.setValue(SKAttributeValue(float: Float(FishSpecies.allCases.firstIndex(of: fish.species)!)), forAttribute: "a_species")
             let width: Float = fish.species == .loach ? 0.39 : 0.335
             node.setValue(SKAttributeValue(vectorFloat2: SIMD2(width, width * 2)), forAttribute: "a_sampleScale")
             node.zPosition = CGFloat(5 + fish.depth)
@@ -184,6 +139,7 @@ final class AquariumScene: SKScene {
         let clock = simulation.time
         backgroundShader.uniformNamed("u_night")?.floatValue = Float(nightAmount)
         fishShader.uniformNamed("u_night")?.floatValue = Float(nightAmount)
+        bubbleShader.uniformNamed("u_night")?.floatValue = Float(nightAmount)
         backgroundShader.uniformNamed("u_clock")?.floatValue = Float(clock)
         let scale = max(0.1, (framing?.imageRect.height ?? size.height) / 900)
         for f in simulation.fish {
@@ -204,7 +160,8 @@ final class AquariumScene: SKScene {
                 bite = sin(response.age * 18) * 0.045 * envelope
             } else { bite = 0 }
             node.zRotation = CGFloat((max(-0.27, min(0.27, f.vy * 9)) + bite) * cos(f.yaw))
-            node.alpha = CGFloat(min(1, 0.85 + f.depth * 0.12))
+            // Distance changes color, never the opacity of a fish's body.
+            node.alpha = 1
             if let shadow = fishShadows[f.id] {
                 shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * 0.085)
                 shadow.size = CGSize(width: body * 0.72, height: body * 0.08)
@@ -238,7 +195,14 @@ final class AquariumScene: SKScene {
             bubble.position = framing?.point(x: state.x, y: state.y) ?? .zero
             let top = simulation.visibleRegion.top
             bubble.alpha = state.age < 0 ? 0 : CGFloat(min(1, state.age * 1.7) * min(1, max(0, top - state.y) * 14))
-            bubble.setScale(scale * state.radius * (1 + max(0, state.age) * 0.006))
+            let expansion = 1 + max(0, state.y - state.originY) * 0.10
+            let diameter = scale * state.radius * 2 * expansion
+            let wobble = sin(max(0, state.age) * 2.6 + state.phase) * 0.025
+            bubble.size = CGSize(width: diameter * (1 + wobble), height: diameter / (1 + wobble))
+            let imageSize = framing?.imageRect.size ?? size
+            let w = Float(bubble.size.width / imageSize.width), h = Float(bubble.size.height / imageSize.height)
+            bubble.setValue(SKAttributeValue(vectorFloat4: SIMD4(Float(state.x) - w / 2, Float(state.y) - h / 2, w, h)), forAttribute: "a_waterRect")
+            bubble.setValue(SKAttributeValue(float: Float(min(0.5, 1.5 / max(1, diameter)))), forAttribute: "a_edge")
         }
     }
 

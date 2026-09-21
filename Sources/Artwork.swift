@@ -1,5 +1,6 @@
 import AppKit
 import SpriteKit
+import CoreImage
 
 enum Artwork {
     static let root: URL = {
@@ -9,6 +10,33 @@ enum Artwork {
     }()
     static func sceneURL(_ theme: AquariumTheme) -> URL { root.appendingPathComponent("Scenes/\(theme.assetName).png") }
     static func image(_ theme: AquariumTheme) -> NSImage { NSImage(contentsOf: sceneURL(theme)) ?? NSImage(size: NSSize(width: 16, height: 9)) }
+    private static var regionTextures: [AquariumTheme: SKTexture] = [:]
+    static func motionRegions(_ theme: AquariumTheme) -> SKTexture {
+        if let existing = regionTextures[theme] { return existing }
+        let source = image(theme).cgImage(forProposedRect: nil, context: nil, hints: nil)!
+        let width = 512, height = Int(Double(source.height) / Double(source.width) * 512)
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let bytes = context.data!.assumingMemoryBound(to: UInt8.self)
+        for i in 0..<(width * height) {
+            let r = Double(bytes[i * 4]) / 255, g = Double(bytes[i * 4 + 1]) / 255, b = Double(bytes[i * 4 + 2]) / 255
+            let vegetation = min((g - r * 0.85) / (g + 0.12), (g - b) / (g + 0.12))
+            bytes[i * 4] = UInt8(max(0, min(1, (vegetation - 0.035) / 0.16)) * 255)
+            bytes[i * 4 + 1] = UInt8(max(0, min(1, (b - r - 0.015) * 15)) * 255)
+            bytes[i * 4 + 2] = 0; bytes[i * 4 + 3] = 255
+        }
+        // Include a soft margin around leaves so their cutout edges move with them.
+        let mask = CIImage(cgImage: context.makeImage()!).clampedToExtent()
+            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 2])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.5])
+        let bitmap = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(mask, from: CGRect(x: 0, y: 0, width: width, height: height))!
+        let texture = SKTexture(cgImage: bitmap)
+        texture.filteringMode = .linear
+        regionTextures[theme] = texture
+        return texture
+    }
     private static let fishTextures: [FishSpecies: SKTexture] = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { species in
         let image = NSImage(contentsOf: root.appendingPathComponent("Fish/\(species.rawValue)-turns.png"))!
         let texture = SKTexture(image: image)
@@ -16,6 +44,13 @@ enum Artwork {
         return (species, texture)
     })
     static func fishTexture(_ species: FishSpecies) -> SKTexture { fishTextures[species]! }
+    static let turnCorrespondence: SKTexture = {
+        let bytes = try! Data(contentsOf: root.appendingPathComponent("Fish/turn-correspondence.flow"))
+        precondition(bytes.count == 1024 * 1024 * 4)
+        let texture = SKTexture(data: bytes, size: CGSize(width: 1024, height: 1024), flipped: true)
+        texture.filteringMode = .linear
+        return texture
+    }()
     // The generated poses have variable widths. Source rectangles keep each whole fish
     // centered at constant physical scale, including the narrow head-on and tail-on views.
     static func poseRect(_ index: Int, species: FishSpecies) -> SIMD4<Float> {

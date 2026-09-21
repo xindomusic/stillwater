@@ -14,6 +14,7 @@ xcrun swiftc -swift-version 5 -O -module-cache-path build/module-cache -target a
 cp Resources/Info.plist build/Stillwater.app/Contents/Info.plist
 cp Resources/Scenes/*-crystal.png build/Stillwater.app/Contents/Resources/Scenes/
 cp Resources/Fish/*-turns.png build/Stillwater.app/Contents/Resources/Fish/
+cp Resources/Fish/*.flow build/Stillwater.app/Contents/Resources/Fish/
 cp LICENSE build/Stillwater.app/Contents/Resources/
 if [[ -f Resources/AppIcon.icns ]]; then cp Resources/AppIcon.icns build/Stillwater.app/Contents/Resources/; fi
 /usr/bin/codesign --force --sign - build/Stillwater.app

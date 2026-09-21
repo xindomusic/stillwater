@@ -282,7 +282,7 @@ struct SettingsView: View {
             VStack(spacing: 22) {
                 sliderRow("Swimming speed", detail: "From a gentle drift to a lively swim", value: $store.configuration.swimmingSpeed, range: 0...2, display: String(format: "%.1f×", config.swimmingSpeed), icon: "fish")
                 sliderRow("Plant sway", detail: "A soft current through the leaves", value: $store.configuration.plantSway, range: 0...1, display: "\(Int(config.plantSway * 100))%", icon: "leaf")
-                sliderRow("Water shimmer", detail: "Subtle ripples of underwater light", value: $store.configuration.shimmer, range: 0...1, display: "\(Int(config.shimmer * 100))%", icon: "sparkles")
+                sliderRow("Water movement", detail: "Surface ripples and drifting underwater light", value: $store.configuration.shimmer, range: 0...1, display: "\(Int(config.shimmer * 100))%", icon: "sparkles")
                 sliderRow("Brightness", detail: "Set the mood for your desktop", value: $store.configuration.brightness, range: 0.4...1.3, display: "\(Int(config.brightness * 100))%", icon: "sun.max")
             }.padding(23).background(Palette.card, in: RoundedRectangle(cornerRadius: 13)).overlay(RoundedRectangle(cornerRadius: 13).stroke(Palette.border))
             VStack(alignment: .leading, spacing: 7) {

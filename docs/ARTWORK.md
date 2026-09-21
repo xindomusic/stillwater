@@ -11,6 +11,7 @@ Stillwater’s bundled scenes and fish views were generated specifically for thi
 | `Resources/Fish/cherry-turns.png` | Eight cherry barb views |
 | `Resources/Fish/pearl-turns.png` | Eight pearl gourami views |
 | `Resources/Fish/loach-turns.png` | Eight kuhli loach views |
+| `Resources/Fish/turn-correspondence.flow` | Offline image-correspondence data derived from the fish views with Apple Vision |
 | `Resources/AppIcon.icns` | App icon drawn by `tools/create-icon.swift` |
 
 [Scene prompts](../Resources/ASSET_PROMPTS.md) and [fish prompts](../Resources/Fish/TURNTABLE_PROMPTS.md) are retained for provenance. Pose rectangles are defined in `Sources/Artwork.swift`; generated atlas columns are not uniformly spaced.

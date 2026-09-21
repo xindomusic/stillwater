@@ -171,6 +171,15 @@ import CoreGraphics
         var atmosphereConfig = AquariumConfiguration(); atmosphereConfig.bubbles = true
         atmosphereConfig.swimmingSpeed = 0
         var atmosphere = AquariumSimulation(); atmosphere.synchronize(atmosphereConfig)
+        for _ in 0..<240 {
+            let previous = atmosphere.bubbles
+            atmosphere.step(delta: 1.0 / 60, configuration: atmosphereConfig)
+            for (before, after) in zip(previous, atmosphere.bubbles) where before.generation == after.generation {
+                require(after.y >= before.y, "Bubbles must rise monotonically")
+                require(abs(after.x - before.x) < 0.0005, "Detachment and lateral bubble drift must remain continuous")
+                require(after.y - before.y <= after.riseSpeed / 60 + 0.000001, "Bubble rise must not jump beyond its terminal speed")
+            }
+        }
         let origins = atmosphere.bubbles.map(\.originX)
         for _ in 0..<3000 { atmosphere.step(delta: 1.0 / 30, configuration: atmosphereConfig) }
         require(atmosphere.bubbles.count == 14 && atmosphere.bubbles.allSatisfy { $0.generation > 0 }, "Bubbles must respawn independently of fish speed")

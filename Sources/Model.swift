@@ -290,10 +290,11 @@ struct AquariumSimulation {
         let x = left + unit * width
         let bottom = visibleRegion.bottom
         let y = bottom + bubbleRandom.value(0.01...0.10) * max(0, visibleRegion.top - bottom)
+        let radius = bubbleRandom.value(1.1...3.0)
         return BubbleState(x: x, y: y, originX: x, originY: y,
-            age: -bubbleRandom.value(0.2...5.0), riseSpeed: bubbleRandom.value(0.025...0.050),
-            drift: bubbleRandom.value(0.004...0.014), phase: bubbleRandom.value(0...(2 * .pi)),
-            radius: bubbleRandom.value(1.1...3.0), generation: (previous?.generation ?? -1) + 1)
+            age: -bubbleRandom.value(0.2...5.0), riseSpeed: 0.020 + radius * 0.017,
+            drift: bubbleRandom.value(0.001...0.003), phase: bubbleRandom.value(0...(2 * .pi)),
+            radius: radius, generation: (previous?.generation ?? -1) + 1)
     }
 
     private mutating func advanceBubbles(_ dt: Double, configuration: AquariumConfiguration) {
@@ -302,9 +303,11 @@ struct AquariumSimulation {
         for i in bubbles.indices {
             bubbles[i].age += dt
             guard bubbles[i].age >= 0 else { continue }
-            bubbles[i].y = bubbles[i].originY + bubbles[i].age * bubbles[i].riseSpeed
+            let age = bubbles[i].age
+            // Ease into buoyant rise after detaching. Larger bubbles rise faster.
+            bubbles[i].y = bubbles[i].originY + (age - 0.18 * (1 - exp(-age / 0.18))) * bubbles[i].riseSpeed
             bubbles[i].x = min(visibleRegion.right, max(visibleRegion.left, bubbles[i].originX
-                + sin(bubbles[i].age * 0.75 + bubbles[i].phase) * bubbles[i].drift))
+                + (sin(age * 2.1 + bubbles[i].phase) - sin(bubbles[i].phase)) * bubbles[i].drift * (1 - exp(-age * 3))))
             if bubbles[i].y >= visibleRegion.top { bubbles[i] = makeBubble(previous: bubbles[i]) }
         }
     }

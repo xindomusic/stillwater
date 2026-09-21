@@ -8,7 +8,7 @@
     <img alt="macOS 14 or later, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-697586">
     <a href="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml"><img alt="Build and test" src="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml/badge.svg"></a>
   </p>
-  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.0/Stillwater-1.0.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.0/Stillwater-1.0.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
+  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.1/Stillwater-1.0.1-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.1/Stillwater-1.0.1-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
 </div>
 
 ![Riverlight: clear freshwater, planted river stones, and Asian freshwater fish](docs/images/riverlight.png)
@@ -25,7 +25,7 @@ Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **N
 | **Four freshwater species** | Harlequin rasboras, cherry barbs, pearl gouramis, and kuhli loaches. Set each population from 0–30. |
 | **Responsive feeding** | Pellets enter in staggered sprinkles from changing locations. Fish notice, approach, nibble, and drift apart. |
 | **Day and night** | Follow macOS Light/Dark appearance, including its automatic schedule, or choose Day or Night. |
-| **Gentle atmosphere** | Plant sway, shimmer, optional particles, and bubbles with changing origins, sizes, and rise speeds. |
+| **Gentle atmosphere** | Leaf sway, rippling surface water, drifting light, optional particles, and glassy bubbles from changing sources. |
 | **Your pace** | Swimming speed, brightness, and 15/30/60 fps options. Still mode freezes the scene and pauses rendering. |
 | **Desktop friendly** | Lives behind desktop icons, ignores mouse clicks, and supports the main display or all displays. |
 | **Keep a moment** | Export a display-resolution PNG or set it as a permanent macOS wallpaper. |
@@ -68,7 +68,7 @@ A short capture from the app’s renderer. The GIF is sampled at 15 fps; the app
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14 or later. The published binary is arm64. Local rendering was tested on an M4 with macOS 27; see [validation](VALIDATION.md) for coverage and limits.
 
-**First launch:** v1.0.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
+**First launch:** v1.0.1 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
 
 Closing settings leaves the aquarium running. **Quit Stillwater** from the fish menu to reveal your underlying wallpaper. To launch at login, add Stillwater through macOS Login Items.
 
@@ -108,11 +108,11 @@ No third-party packages are required. Build scripts target Apple Silicon and mac
 zsh tools/package.sh
 ```
 
-See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [1.0 release notes](docs/releases/v1.0.0.md).
+See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.0.1.md).
 
 ## How it works
 
-Photographic-style scene plates and fish views are combined with shaders and a deterministic swimming simulation. Fish have independent moods, smooth turns, and feeding responses; bubbles and pellets use separate particle behavior. This is a layered 2D aquarium, with the artistic and motion limits described in [development notes](docs/DEVELOPMENT.md).
+Photographic-style scene plates and fish views are combined with shaders and a deterministic swimming simulation. Fish have independent moods, warped turns without overlapping images, and feeding responses; bubbles and pellets use separate particle behavior. This is a layered 2D aquarium, with the artistic and motion limits described in [development notes](docs/DEVELOPMENT.md).
 
 All scene and fish artwork was generated for the project with OpenAI’s image generation tool. The app itself makes no AI or network calls. [Artwork credits and prompts](docs/ARTWORK.md) document the bundled assets.
 
