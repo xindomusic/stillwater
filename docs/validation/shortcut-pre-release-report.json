@@ -1,0 +1,86 @@
+{
+  "desktopWindow" : {
+    "allSpaces" : true,
+    "canBecomeKey" : false,
+    "iconLevel" : -2147483603,
+    "ignoresMouseEvents" : true,
+    "level" : -2147483622
+  },
+  "liveOnscreenAnimation" : true,
+  "liveStillLiveTransition" : true,
+  "motionCapture" : "6 seconds of production simulation and body\/turn shader, sampled at 15fps",
+  "productionControls" : {
+    "appearanceChangeKeepsFishFrozen" : true,
+    "appearanceTestScope" : "AppKit appearance overrides exercise the production KVO observer; macOS global appearance preferences were not changed",
+    "closeReopenPreview" : true,
+    "dayNightOverrides" : true,
+    "desktopWindowsListedByWindowServer" : 1,
+    "desktopWindowsShown" : 1,
+    "exportDimensions" : [
+      {
+        "desktopEnabled" : true,
+        "height" : 1440,
+        "width" : 3440
+      },
+      {
+        "desktopEnabled" : false,
+        "height" : 1440,
+        "width" : 3440
+      }
+    ],
+    "feedingRespondersWithinTwoSeconds" : 22,
+    "globalFeedingShortcutDispatch" : true,
+    "globalFeedingShortcutRegistered" : true,
+    "globalFeedingShortcutReregister" : true,
+    "globalFeedingShortcutUnregister" : true,
+    "liveLightingTransitionFades" : true,
+    "manualChecksNotPerformed" : [
+      "Finder icon dragging",
+      "Mission Control \/ Spaces switching",
+      "Stage Manager",
+      "physical display hotplug",
+      "real sleep\/wake",
+      "native wallpaper installation"
+    ],
+    "mealsEatenDuringFeedingCheck" : 12,
+    "productionFeedAction" : true,
+    "sampleContext" : "Review process with production desktop windows and a visible 1120x630 preview; not a sustained power benchmark",
+    "sampleDurationSecondsPerMode" : 3,
+    "sampleLiveCPUPercentOfOneCore" : 12.88377286776835,
+    "sampleLivePreviewFPS" : 25.625418414864985,
+    "sampleStillCPUPercentOfOneCore" : 0.73146078774337076,
+    "sceneAndPopulationChangeWhileStill" : true,
+    "shortcutTestScope" : "Real OS shortcut registration and dispatch through its Carbon handler; no synthetic system key presses or input monitoring",
+    "stillFramesRenderedDuringSample" : 0,
+    "syntheticDisplaySleepWakeNotifications" : true,
+    "systemAppearanceObservationWhileStill" : true
+  },
+  "result" : "passed",
+  "scenes" : [
+    {
+      "bytes" : 2696086,
+      "fish" : 26,
+      "theme" : "sunken-grove"
+    },
+    {
+      "bytes" : 2579636,
+      "fish" : 26,
+      "theme" : "riverlight"
+    },
+    {
+      "bytes" : 2933641,
+      "fish" : 26,
+      "theme" : "willow-springs"
+    }
+  ],
+  "screens" : [
+    {
+      "height" : 1440,
+      "scale" : 1,
+      "width" : 3440
+    }
+  ],
+  "settingsCapture" : "Production layout with renderer snapshot substituted for Metal layer",
+  "stillPositionsUnchanged" : true,
+  "stillRendererPaused" : true
+}

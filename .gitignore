@@ -1,0 +1,16 @@
+build/
+dist/
+.DS_Store
+*.dSYM/
+.env
+.env.*
+*.p12
+*.p8
+# Local design/review history; the public docs describe the shipped release.
+AQUARIUM_PLAN.md
+FISH_BEHAVIOR_REVIEW.md
+# Preserve earlier artwork locally; publish only the seven current assets.
+Resources/Scenes/*.png
+!Resources/Scenes/*-crystal.png
+Resources/Fish/*.png
+!Resources/Fish/*-turns.png

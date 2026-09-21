@@ -1,0 +1,22 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test simulation and settings
+        run: zsh tools/test.sh
+      - name: Build Apple Silicon app
+        run: zsh tools/build.sh
+      - name: Validate bundle
+        run: |
+          codesign --verify --strict build/Stillwater.app
+          plutil -lint build/Stillwater.app/Contents/Info.plist
+          test "$(lipo -archs build/Stillwater.app/Contents/MacOS/Stillwater)" = arm64
