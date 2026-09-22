@@ -8,12 +8,12 @@
     <img alt="macOS 14 or later, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-697586">
     <a href="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml"><img alt="Build and test" src="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml/badge.svg"></a>
   </p>
-  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.4/Stillwater-1.0.4-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.0.4/Stillwater-1.0.4-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
+  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.1.0/Stillwater-1.1.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.1.0/Stillwater-1.1.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
 </div>
 
 ![Riverlight: clear freshwater, planted river stones, and Asian freshwater fish](docs/images/riverlight.png)
 
-Stillwater turns your desktop into a planted freshwater aquarium. Each fish chooses its own changing route, pace, and rest periods. Fish glide, explore, and react to food, with individual fin rhythms and bending turns. Daylight fades into a softer night scene with your Mac’s appearance. Keep it alive in the background, or freeze a moment as a still wallpaper.
+Stillwater turns your desktop into a planted freshwater aquarium. Each fish chooses its own changing route, pace, and rest periods. Fish glide, explore, and react to food, with individual fin rhythms, bending turns, and a gently level posture. Shrimp alternate grazing, drifting, and hiding near cover; crabs crawl across the sand with eight staggered walking legs. Daylight fades into a softer night scene with your Mac’s appearance. Keep it alive in the background, or freeze a moment as a still wallpaper.
 
 Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **No account, ads, subscriptions, analytics, or runtime downloads.**
 
@@ -22,13 +22,43 @@ Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **N
 | | |
 | --- | --- |
 | **Three original scenes** | Riverlight, Sunken Grove, and Willow Springs, with clear water, plants, sand, stones, and roots. |
-| **Four freshwater species** | Harlequin rasboras, cherry barbs, pearl gouramis, and kuhli loaches. Set each population from 0–30. |
+| **Ten resident choices** | Eight fish varieties in different sizes and colors, plus cherry shrimp and Thai micro crabs. Set each population from 0–30, up to 120 total. |
 | **Responsive feeding** | Shaded pellets tumble through near and far water in staggered sprinkles. Fish notice, approach, nibble, and drift apart. |
 | **Day and night** | Follow macOS Light/Dark appearance, including its automatic schedule, or choose Day or Night. |
 | **Gentle atmosphere** | Leaf sway, rippling surface water, drifting light, optional particles, and glassy bubbles at different distances and changing sources. |
 | **Your pace** | Swimming speed, brightness, and 15/30/60 fps options. Still mode freezes the scene and pauses rendering. |
 | **Desktop friendly** | Lives behind desktop icons, ignores mouse clicks, and supports the main display or all displays. |
 | **Keep a moment** | Export a display-resolution PNG or set it as a permanent macOS wallpaper. |
+
+### Choose your residents
+
+Open **Residents** in settings and filter by **Small fish**, **Larger fish**, or **Shrimp & crabs**. Use the plus and minus controls to build your own mix, or start with **Colorful mix** or **Bottom garden**. Updating keeps your existing population; new species start at zero.
+
+| Resident | Look and scale |
+| --- | --- |
+| Harlequin rasbora | Small, copper and charcoal |
+| Cherry barb | Small, cherry red |
+| Celestial pearl danio | Tiny, midnight blue with pearl spots |
+| Golden barb | Medium, golden yellow |
+| Pearl gourami | Large, pearlescent |
+| Kuhli loach | Medium, gold and brown stripes |
+| Blue betta | Medium, cobalt blue with flowing fins |
+| Kohaku koi | Large, ivory and vermilion |
+| Cherry shrimp | Tiny, scarlet red |
+| Thai micro crab | Tiny, silvery sand |
+
+![A colorful community with ten resident varieties](docs/images/colorful-community.png)
+
+<details>
+<summary><strong>Browse the new resident controls</strong></summary>
+
+| Larger fish | Shrimp & crabs |
+| --- | --- |
+| ![Larger fish controls](docs/images/residents-large.png) | ![Shrimp and crab controls](docs/images/residents-invertebrates.png) |
+
+</details>
+
+This is a decorative virtual community. Sizes and behavior are tuned for the wallpaper, rather than a guide to stocking a real aquarium.
 
 ### Light or dark, naturally
 
@@ -63,7 +93,7 @@ A short capture from the app’s renderer. The GIF is sampled at 15 fps; the app
 <details>
 <summary><strong>See the swimming up close</strong></summary>
 
-![Hovering, bending turns, and stronger tail strokes for all four species](docs/images/fin-motion.gif)
+![Hovering, bending turns, and stronger tail strokes for the original four fish species](docs/images/fin-motion.gif)
 
 An enlarged shader demonstration of hovering, articulated turns, and dashing. Captured at 20 fps with controlled swimming inputs; individual fish in the aquarium vary their own rhythms.
 
@@ -77,7 +107,7 @@ An enlarged shader demonstration of hovering, articulated turns, and dashing. Ca
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14 or later. The published binary is arm64. Local rendering was tested on an M4 with macOS 27; see [validation](VALIDATION.md) for coverage and limits.
 
-**First launch:** v1.0.4 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
+**First launch:** v1.1.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
 
 Closing settings leaves the aquarium running. **Quit Stillwater** from the fish menu to reveal your underlying wallpaper. To launch at login, add Stillwater through macOS Login Items.
 
@@ -89,7 +119,7 @@ Closing settings leaves the aquarium running. **Quit Stillwater** from the fish 
 | Feed while Stillwater is active | **Command–F** (`⌘F`) |
 | Open settings while Stillwater is active | **Command–comma** (`⌘,`) |
 
-The **Feed fish** button and menu command do the same thing. Feeding requires Live mode, nonzero swimming speed, and at least one fish. Portions have a short cooldown and a limit to keep the water uncluttered. Disable the global shortcut in **Motion & light**; if another app owns the combination, the button and local shortcut remain available.
+The **Feed fish** button and menu command do the same thing. Feeding requires Live mode, nonzero swimming speed, and at least one resident. Shrimp and crabs forage for sinking pellets near the sand. Portions have a short cooldown and a limit to keep the water uncluttered. Disable the global shortcut in **Motion & light**; if another app owns the combination, the button and local shortcut remain available.
 
 ## Live, still, or saved
 
@@ -117,7 +147,7 @@ No third-party packages are required. Build scripts target Apple Silicon and mac
 zsh tools/package.sh
 ```
 
-See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.0.4.md).
+See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.1.0.md).
 
 ## How it works
 

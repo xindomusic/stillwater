@@ -18,10 +18,57 @@ enum FishRendering {
             float slope = -(2.0 * curve.x * u + 3.0 * curve.y * u * u + 4.0 * curve.z * u * u * u) / (0.76 * photoScale.x);
             return vec2(z, slope);
         }
+        float segmentDistance(vec2 point, vec2 start, vec2 end) {
+            vec2 edge = end - start;
+            float t = clamp(dot(point - start, edge) / dot(edge, edge), 0.0, 1.0);
+            return length(point - start - edge * t);
+        }
+        vec2 crabUV(vec2 uv, float phase, vec4 stroke, vec4 fins) {
+            // Eight photographed walking legs: four rooted pairs around a rigid shell.
+            vec2 shell = (uv - vec2(0.5, 0.575)) / vec2(0.22, 0.145);
+            float outside = smoothstep(0.96, 1.25, dot(shell, shell));
+            if (outside < 0.001) { return uv; }
+            float closest = 2.0, selected = 0.0;
+            vec2 pivot = vec2(0.5), knee = vec2(0.5);
+            for (int i = 0; i < 8; i++) {
+                int pair = i / 2;
+                vec2 root = vec2(0.36,0.63), joint = vec2(0.26,0.735), foot = vec2(0.17,0.66);
+                if (pair == 1) { root = vec2(0.33,0.57); joint = vec2(0.15,0.63); foot = vec2(0.06,0.43); }
+                if (pair == 2) { root = vec2(0.33,0.53); joint = vec2(0.14,0.50); foot = vec2(0.08,0.28); }
+                if (pair == 3) { root = vec2(0.36,0.49); joint = vec2(0.23,0.43); foot = vec2(0.22,0.20); }
+                if (i - pair * 2 == 1) { root.x = 1.0 - root.x; joint.x = 1.0 - joint.x; foot.x = 1.0 - foot.x; }
+                float distance = min(segmentDistance(uv,root,joint), segmentDistance(uv,joint,foot));
+                if (distance < closest) { closest = distance; selected = float(i); pivot = root; knee = joint; }
+            }
+            float side = mod(selected,2.0);
+            float pair = floor(selected * 0.5);
+            float rhythm = phase * 0.8 + mod(pair + side,2.0) * 3.14159265;
+            rhythm += pair * 0.17 + sin(fins.x * 0.43 + selected * 2.4) * 0.16;
+            float power = min(1.0, stroke.x * 2.8) * outside;
+            float angle = sin(rhythm) * 0.13 * power * mix(-1.0,1.0,side);
+            vec2 offset = uv - pivot;
+            uv = pivot + mat2(cos(angle),-sin(angle),sin(angle),cos(angle)) * offset;
+            float lower = smoothstep(0.025,0.12,length(uv - knee));
+            uv.y -= pow(max(0.0,sin(rhythm)),2.0) * 0.016 * power * lower;
+            return uv;
+        }
         vec2 photoUV(vec3 p, vec2 scale, vec4 rect, float phase, float species, vec4 stroke, vec4 fins) {
             vec2 uv = p.xy * 0.5 * scale / rect.zw + 0.5;
+            if (species > 4.5) { return crabUV(uv,phase,stroke,fins); }
+            if (species > 3.5) {
+                // Carapace stays rigid. Walking legs and antennae move from their roots.
+                float crab = step(4.5, species);
+                float leg = 1.0 - smoothstep(mix(0.31, 0.40, crab), mix(0.41, 0.48, crab), uv.y);
+                if (crab > 0.5) { leg = max(leg, smoothstep(0.14, 0.34, abs(uv.x - 0.5))); }
+                float stride = sin(phase + uv.x * 31.0 + crab * uv.y * 17.0);
+                uv.x += leg * stride * stroke.x * 0.021;
+                uv.y += leg * cos(phase + uv.x * 31.0) * stroke.x * 0.012;
+                float feeler = (1.0 - crab) * smoothstep(0.69, 0.9, uv.x) * smoothstep(0.52, 0.65, uv.y);
+                uv.y += feeler * sin(fins.x + uv.x * 6.0) * fins.w * 0.008;
+                return uv;
+            }
             if (uv.x > 0.83) { return uv; }
-            float loach = step(2.5, species);
+            float loach = step(2.5, species) * (1.0 - step(3.5, species));
             float posterior = clamp((0.76 - uv.x) / 0.70, 0.0, 1.0);
             float envelope = pow(posterior, mix(2.2, 1.25, loach));
             float wave = sin(phase - posterior * mix(3.5, 7.0, loach));
@@ -74,8 +121,11 @@ enum FishRendering {
             vec2 centerUV = vec2(0.59,0.49);
             vec2 extentUV = vec2(0.37,0.17);
             float thickness = 0.13;
+            if (a_species > 0.5 && a_species < 1.5) { centerUV = vec2(0.59,0.49); extentUV = vec2(0.36,0.105); thickness = 0.09; }
             if (a_species > 1.5 && a_species < 2.5) { centerUV = vec2(0.59,0.50); extentUV = vec2(0.36,0.23); thickness = 0.14; }
-            if (a_species > 2.5) { centerUV = vec2(0.54,0.45); extentUV = vec2(0.44,0.077); thickness = 0.075; }
+            if (a_species > 2.5 && a_species < 3.5) { centerUV = vec2(0.54,0.45); extentUV = vec2(0.44,0.077); thickness = 0.075; }
+            if (a_species > 3.5 && a_species < 4.5) { centerUV = vec2(0.47,0.50); extentUV = vec2(0.27,0.085); thickness = 0.065; }
+            if (a_species > 4.5) { centerUV = vec2(0.50,0.54); extentUV = vec2(0.18,0.14); thickness = 0.12; }
             vec2 photoScale = 2.0 * a_rect0.zw / a_sampleScale;
             // A quartic Bezier hull bounds the entire curved spine. This also
             // skips most empty pixels during narrow, head-on views.
@@ -140,6 +190,13 @@ enum FishRendering {
             float waterMix = 0.025 + (1.15 - a_depth) * 0.065;
             color.rgb = mix(color.rgb, vec3(0.68,0.76,0.81) * color.a, waterMix);
             color.rgb *= u_brightness * mix(vec3(1.0), vec3(0.40,0.47,0.60), u_night);
+            if (a_species > 3.5 && a_species < 4.5 && a_stroke.z > 0.0) {
+                // A shrimp passes behind its refuge from the leading side. The
+                // visible part stays opaque instead of becoming a ghost silhouette.
+                float axis = mix(v_tex_coord.x,1.0 - v_tex_coord.x,a_stroke.w);
+                float edge = 1.06 - a_stroke.z * 1.12;
+                color *= 1.0 - smoothstep(edge - 0.025,edge + 0.025,axis);
+            }
             gl_FragColor = color * v_color_mix.a;
             }
             }

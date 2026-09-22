@@ -1,0 +1,26 @@
+{
+  "fishTextureRGBABytes" : 13801536,
+  "samples" : [
+    {
+      "cpuPercentOfOneCore" : 12.310840115414685,
+      "fps" : 29.2541792443247,
+      "physicalFootprintMiB" : 147.65709686279297,
+      "scenario" : "default-30"
+    },
+    {
+      "cpuPercentOfOneCore" : 28.508116136230488,
+      "fps" : 29.091695548942273,
+      "physicalFootprintMiB" : 165.76649475097656,
+      "scenario" : "maximum-30"
+    },
+    {
+      "cpuPercentOfOneCore" : 51.621347520465392,
+      "fps" : 53.316547136676014,
+      "physicalFootprintMiB" : 165.79774475097656,
+      "scenario" : "maximum-60"
+    }
+  ],
+  "scope" : "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. Maximum scenarios contain 12 of each of the 10 species. No screenshots, feeding, or global preferences. Not a sustained power benchmark.",
+  "stillCPUPercentOfOneCore" : 0.57230000000005887,
+  "stillFrames" : 0
+}

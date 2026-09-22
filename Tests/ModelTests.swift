@@ -85,6 +85,81 @@ import CoreGraphics
         legacy.counts = ["cardinal": 3, "ember": 5, "gourami": 1, "cory": 2]
         legacy.sanitize()
         require(legacy.totalFish == 11 && legacy.count(.rasbora) == 3 && legacy.count(.loach) == 2, "Asian species must retain existing saved population choices")
+        require(FishSpecies.allCases.filter(\.usesProfileAsset).allSatisfy { legacy.count($0) == 0 }, "Upgrades must not add new residents without a choice")
+        var mixed = AquariumConfiguration()
+        mixed.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, 12) })
+        mixed.setCount(.crab, 30)
+        require(mixed.totalFish == 120 && mixed.count(.crab) == 12, "Increasing a species at capacity must respect the shared limit")
+        mixed.setCount(.rasbora, 0); mixed.setCount(.crab, 24)
+        require(mixed.totalFish == 120 && mixed.count(.crab) == 24, "Removing residents must make room for another species")
+        mixed.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, 30) })
+        mixed.sanitize()
+        require(mixed.totalFish == 120, "Oversized saved communities must remain within the renderer budget")
+        mixed.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, 3) })
+        mixed.swimmingSpeed = 2
+        let savedMixed = try JSONDecoder().decode(AquariumConfiguration.self, from: JSONEncoder().encode(mixed))
+        require(savedMixed == mixed, "All ten species counts must persist")
+        var posture = AquariumSimulation(seed: 450)
+        posture.synchronize(mixed)
+        for theme in AquariumTheme.allCases {
+            mixed.theme = theme; posture.synchronize(mixed)
+            for frame in 0..<3600 {
+                if frame % 900 == 0 { posture.feed(mixed) }
+                let before = posture.fish
+                posture.step(delta: 1.0 / 30, configuration: mixed)
+                for (fish, previous) in zip(posture.fish, before) {
+                    require(abs(fish.pitch) <= 0.220001, "Swimmers must never tip steeply backward or forward")
+                    require(abs(fish.pitch - previous.pitch) < 0.04, "Posture changes must ease smoothly")
+                    if fish.species.isInvertebrate {
+                        require(fish.pitch == 0 && fish.spineCurve == .zero, "Invertebrate shells must stay level and rigid")
+                        let region = AquariumSimulation.region(for: fish.species, theme: theme)
+                        require((region.bottom...region.top).contains(fish.y), "Shrimp and crabs must remain on the substrate while feeding")
+                    }
+                    if fish.species == .crab {
+                        require(abs(fish.yaw) < 0.65, "Crabs change body angle gently while crawling in different directions")
+                        require(abs(fish.finPhase - previous.finPhase) < 0.7, "Crab gait reversals must keep all feet continuous")
+                    }
+                    let dx = fish.x - previous.x
+                    let region = AquariumSimulation.region(for: fish.species, theme: theme)
+                    if !fish.species.isInvertebrate && fish.x > region.left + 0.02 && fish.x < region.right - 0.02 {
+                        require(dx * cos(fish.yaw) >= -0.000001, "A fish must turn its head before travelling backward across the screen")
+                    }
+                }
+            }
+        }
+        print("PASS: ten-species persistence, bounded populations, upright smooth posture, forward swimming, and substrate residents")
+        var bottomConfig = AquariumConfiguration()
+        bottomConfig.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, $0.isInvertebrate ? 6 : 0) })
+        bottomConfig.swimmingSpeed = 1
+        for theme in AquariumTheme.allCases {
+            bottomConfig.theme = theme
+            var bottom = AquariumSimulation(seed: 1928); bottom.synchronize(bottomConfig)
+            var phases = Set<ShrimpPhase>(), hidingIndividuals = Set<Int>(), directions: [Int: Set<Int>] = [:]
+            var maximumHeight = 0.0
+            for _ in 0..<18000 {
+                bottom.step(delta: 1.0 / 30, configuration: bottomConfig)
+                for resident in bottom.fish {
+                    if resident.species == .shrimp {
+                        let behavior = resident.shrimpBehavior
+                        phases.insert(behavior.phase); maximumHeight = max(maximumHeight, resident.y)
+                        if behavior.concealment > 0.9 {
+                            hidingIndividuals.insert(resident.id)
+                            require(hypot(resident.x - behavior.target.x, (resident.y - behavior.target.y) * 0.65) < 0.026, "Shrimp must reach a refuge before hiding")
+                        }
+                    }
+                    if abs(resident.vx) > 0.0005 { directions[resident.id, default: []].insert(resident.vx < 0 ? 0 : 1) }
+                    if abs(resident.vy) > 0.0005 { directions[resident.id, default: []].insert(resident.vy < 0 ? 2 : 3) }
+                }
+            }
+            require(phases == Set(ShrimpPhase.allCases) && hidingIndividuals.count >= 3, "Shrimp must graze, drift, seek cover, hide and emerge independently in \(theme)")
+            require(maximumHeight > AquariumSimulation.region(for: .loach, theme: theme).top + 0.03, "Shrimp should occasionally drift above the substrate")
+            require(directions.values.filter { $0.count == 4 }.count >= 10, "Crabs and shrimp must explore left, right, forward and back")
+            let frozen = bottom.fish.map { [$0.x, $0.y, $0.yaw, $0.finPhase, $0.shrimpBehavior.concealment, $0.shrimpBehavior.remaining] }
+            var paused = bottomConfig; paused.mode = .still
+            for _ in 0..<60 { bottom.step(delta: 1.0 / 30, configuration: paused) }
+            require(frozen == bottom.fish.map { [$0.x, $0.y, $0.yaw, $0.finPhase, $0.shrimpBehavior.concealment, $0.shrimpBehavior.remaining] }, "Still must freeze shelter timers, crawling and concealment")
+        }
+        print("PASS: independent shrimp shelter cycles, varied drifting and crab crawl directions, and complete refuge freeze")
         var behavior = AquariumSimulation(seed: 12345)
         let natural = AquariumConfiguration()
         behavior.synchronize(natural)

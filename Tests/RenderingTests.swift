@@ -21,7 +21,7 @@ import UniformTypeIdentifiers
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
         let view = SKView(frame: window.contentView!.bounds)
         window.contentView = view; window.orderFront(nil)
-        let scene = SKScene(size: CGSize(width: 1600, height: 880))
+        let scene = SKScene(size: CGSize(width: 1600, height: FishSpecies.allCases.count * 215 + 20))
         scene.scaleMode = .aspectFit; scene.backgroundColor = NSColor(rgb: 0x344958)
         view.presentScene(scene); view.isPaused = true
         let legacy = CommandLine.arguments.count > 2 ? try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8) : nil
@@ -34,15 +34,15 @@ import UniformTypeIdentifiers
                     let pose = Float(column) + 0.5
                     let node = SKSpriteNode(texture: Artwork.fishTexture(species))
                     node.shader = shader; node.size = CGSize(width: 240, height: 240)
-                    node.position = CGPoint(x: 100 + column * 200, y: 755 - row * 215)
+                    node.position = CGPoint(x: 100 + column * 200, y: Int(scene.size.height) - 125 - row * 215)
                     node.setValue(SKAttributeValue(float: 1), forAttribute: "a_depth")
                     node.setValue(SKAttributeValue(float: 0.9), forAttribute: "a_finPhase")
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.48,0.12,0,0)), forAttribute: "a_stroke")
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.7,1.2,0.5,0.65)), forAttribute: "a_fins")
-                    node.setValue(SKAttributeValue(vectorFloat4: SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
+                    node.setValue(SKAttributeValue(vectorFloat4: species.isInvertebrate ? .zero : SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
                     node.setValue(SKAttributeValue(float: 0.3), forAttribute: "a_activity")
                     node.setValue(SKAttributeValue(float: pose), forAttribute: "a_pose")
-                    node.setValue(SKAttributeValue(float: Float(row)), forAttribute: "a_species")
+                    node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
                     node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
                     node.setValue(SKAttributeValue(vectorFloat4: Artwork.poseRect((column + 1) % 8, species: species)), forAttribute: "a_rect1")
                     node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
@@ -88,16 +88,16 @@ import UniformTypeIdentifiers
 
         scene.removeAllChildren(); scene.size = CGSize(width: 256, height: 256); scene.backgroundColor = .clear
         var largestTurnChange = 0.0
-        for (speciesIndex, species) in FishSpecies.allCases.enumerated() {
+        for species in FishSpecies.allCases {
             let node = SKSpriteNode(texture: Artwork.fishTexture(species))
             node.shader = FishRendering.makeShader(); node.size = CGSize(width: 240, height: 240); node.position = CGPoint(x: 128, y: 128)
             node.setValue(SKAttributeValue(float: 1), forAttribute: "a_depth")
             node.setValue(SKAttributeValue(float: 0.9), forAttribute: "a_finPhase")
             node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.48,0.12,0,0)), forAttribute: "a_stroke")
             node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.7,1.2,0.5,0.65)), forAttribute: "a_fins")
-            node.setValue(SKAttributeValue(vectorFloat4: SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
+            node.setValue(SKAttributeValue(vectorFloat4: species.isInvertebrate ? .zero : SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
             node.setValue(SKAttributeValue(float: 0.3), forAttribute: "a_activity")
-            node.setValue(SKAttributeValue(float: Float(speciesIndex)), forAttribute: "a_species")
+            node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
             node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
@@ -124,17 +124,17 @@ import UniformTypeIdentifiers
 
         // Isolate motion on stationary fish so whole-sprite travel cannot hide frozen fins.
         scene.removeAllChildren(); scene.size = CGSize(width: 256, height: 256)
-        for (index, species) in FishSpecies.allCases.enumerated() {
+        for species in FishSpecies.allCases {
             let node = SKSpriteNode(texture: Artwork.fishTexture(species)); node.shader = FishRendering.makeShader()
             node.size = CGSize(width: 240, height: 240); node.position = CGPoint(x: 128, y: 128)
             node.setValue(SKAttributeValue(float: 1), forAttribute: "a_depth")
-            node.setValue(SKAttributeValue(float: Float(index)), forAttribute: "a_species")
+            node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
             node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
             scene.addChild(node)
             let still = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage())
-            for finsOnly in [false, true] {
+            for finsOnly in (species == .crab ? [false] : [false, true]) {
                 node.setValue(SKAttributeValue(float: finsOnly ? 0 : 2.2), forAttribute: "a_finPhase")
                 node.setValue(SKAttributeValue(vectorFloat4: SIMD4(finsOnly ? 0 : 0.8,0,0,0)), forAttribute: "a_stroke")
                 node.setValue(SKAttributeValue(vectorFloat4: finsOnly ? SIMD4(1.7,2.4,0.5,1) : SIMD4(0,0,0.5,0)), forAttribute: "a_fins")
@@ -146,20 +146,55 @@ import UniformTypeIdentifiers
                     if difference > 8 { changes += 1; if x > 212 { faceChanges += 1 } }
                 } }
                 require(changes > 30, "\(species) must visibly move \(finsOnly ? "balancing fins" : "tail") independently")
-                require(faceChanges < 8, "\(species) fin motion must keep the face anchored")
+                require(species.isInvertebrate || faceChanges < 8, "\(species) fin motion must keep the face anchored")
+                if species.isInvertebrate {
+                    var shellChanges = 0, shellPixels = 0
+                    let rows = species == .shrimp ? 132..<141 : 105..<125
+                    for y in rows { for x in 110..<145 {
+                        let p = (y * 256 + x) * 4
+                        if still[p + 3] > 128 { shellPixels += 1 }
+                        if (0..<4).contains(where: { abs(Int(still[p + $0]) - Int(moved[p + $0])) > 8 }) { shellChanges += 1 }
+                    } }
+                    require(shellPixels > 50 && shellChanges < 5, "Walking appendages must not deform the \(species) shell")
+                }
+                if species == .crab {
+                    for foot in [SIMD2<Double>(0.172,0.686), SIMD2(0.051,0.433), SIMD2(0.099,0.289), SIMD2(0.224,0.195)] {
+                        for right in [false, true] {
+                            let u = right ? 1 - foot.x : foot.x
+                            let cx = Int(128 + (u - 0.5) * 240 / 1.08)
+                            let cy = Int(128 - (foot.y - 0.5) * 240 / 1.08)
+                            var footChanges = 0
+                            for y in max(0,cy-17)..<min(256,cy+17) { for x in max(0,cx-17)..<min(256,cx+17) {
+                                let p = (y * 256 + x) * 4
+                                if (0..<4).contains(where: { abs(Int(still[p + $0]) - Int(moved[p + $0])) > 8 }) { footChanges += 1 }
+                            } }
+                            require(footChanges > 6, "Every one of the crab's eight walking feet must step")
+                        }
+                    }
+                }
+            }
+            if species == .shrimp {
+                var coverage: [Int] = []
+                for hiding: Float in [0,0.5,1] {
+                    node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0,0,hiding,0)), forAttribute: "a_stroke")
+                    let bytes = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage())
+                    coverage.append(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 128 }.count)
+                }
+                require(coverage[0] > coverage[1] && coverage[1] > 100 && coverage[2] == 0, "Refuge occlusion must conceal the shrimp progressively while visible parts stay opaque")
             }
             node.removeFromParent()
         }
-        print("PASS: all species move tail and balancing fins independently while their faces stay anchored")
+        print("PASS: independent fish fins and anchored faces; all eight crab feet, shrimp antennae, rigid shells, and opaque refuge occlusion")
 
         scene.removeAllChildren(); scene.size = CGSize(width: 1000, height: 740); scene.backgroundColor = NSColor(rgb: 0x344958)
+        let motorSpecies = Array(FishSpecies.allCases.prefix(4))
         var motorNodes: [SKSpriteNode] = [], motors: [FishStroke] = [], phases: [Double] = []
-        for (row, species) in FishSpecies.allCases.enumerated() {
+        for (row, species) in motorSpecies.enumerated() {
             for column in 0..<3 {
                 let node = SKSpriteNode(texture: Artwork.fishTexture(species)); node.shader = FishRendering.makeShader()
                 node.position = CGPoint(x: 165 + column * 335, y: 650 - row * 180); node.size = CGSize(width: 265, height: 265)
                 node.setValue(SKAttributeValue(float: 1), forAttribute: "a_depth")
-                node.setValue(SKAttributeValue(float: Float(row)), forAttribute: "a_species")
+                node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
                 node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
                 node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
                 node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
@@ -177,13 +212,13 @@ import UniformTypeIdentifiers
                     let turnClock = Double(frame) / 20 * 0.9
                     let yaw = turning ? Double.pi * (0.5 - 0.5 * cos(turnClock)) : 0
                     let turnRate = turning ? Double.pi * 0.45 * sin(turnClock) : 0
-                    motors[i].advance(delta: 1.0 / 20, species: FishSpecies.allCases[i / 3], speed: [0.035,0.85,2.5][i % 3], acceleration: 0, turnRate: turnRate)
+                    motors[i].advance(delta: 1.0 / 20, species: motorSpecies[i / 3], speed: [0.035,0.85,2.5][i % 3], acceleration: 0, turnRate: turnRate)
                     motorNodes[i].setValue(SKAttributeValue(float: Float(yaw / (.pi / 4))), forAttribute: "a_pose")
                     phases[i] += motors[i].tailRate / 20
                     motorNodes[i].setValue(SKAttributeValue(float: Float(phases[i])), forAttribute: "a_finPhase")
                     motorNodes[i].setValue(SKAttributeValue(vectorFloat4: SIMD4(Float(motors[i].amplitude),0,0,0)), forAttribute: "a_stroke")
                     motorNodes[i].setValue(SKAttributeValue(vectorFloat4: SIMD4(Float(motors[i].pectoralPhase),Float(motors[i].dorsalPhase),Float(motors[i].spread),Float(motors[i].finAmplitude))), forAttribute: "a_fins")
-                    motorNodes[i].setValue(SKAttributeValue(vectorFloat4: motors[i].spineCurve(phase: phases[i], species: FishSpecies.allCases[i / 3])), forAttribute: "a_curve")
+                    motorNodes[i].setValue(SKAttributeValue(vectorFloat4: motors[i].spineCurve(phase: phases[i], species: motorSpecies[i / 3])), forAttribute: "a_curve")
                 }
                 let rendered = view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage()
                 if frame == 40 {

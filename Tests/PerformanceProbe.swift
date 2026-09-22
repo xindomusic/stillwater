@@ -32,7 +32,7 @@ import Darwin
         }
         var samples: [[String: Any]] = []
         for (label, count, quality) in [("default-30", 26, RenderQuality.balanced), ("maximum-30", 120, .balanced), ("maximum-60", 120, .smooth)] {
-            for species in FishSpecies.allCases { config.setCount(species, count == 120 ? 30 : species.defaultCount) }
+            config.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, count == 120 ? 12 : $0.defaultCount) })
             config.quality = quality
             desktop.apply(config); preview.apply(config)
             wait(3)
@@ -49,7 +49,7 @@ import Darwin
         }
         let result: [String: Any] = ["samples": samples, "stillCPUPercentOfOneCore": (cpu() - start) / 2 * 100,
             "stillFrames": preview.aquarium.frameCount - frames, "fishTextureRGBABytes": textureBytes,
-            "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. No screenshots, feeding, or global preferences. Not a sustained power benchmark."]
+            "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. Maximum scenarios contain 12 of each of the 10 species. No screenshots, feeding, or global preferences. Not a sustained power benchmark."]
         let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
         let output = CommandLine.arguments.dropFirst().first ?? "build/performance.json"
         try data.write(to: URL(fileURLWithPath: output))

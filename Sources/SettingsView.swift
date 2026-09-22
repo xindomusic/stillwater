@@ -21,7 +21,7 @@ private enum Palette {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case aquarium = "My aquarium", scenes = "Scenes", fish = "Fish", motion = "Motion & light"
+    case aquarium = "My aquarium", scenes = "Scenes", fish = "Fish & friends", motion = "Motion & light"
     var id: String { rawValue }
     var icon: String {
         switch self { case .aquarium: return "water.waves"; case .scenes: return "square.stack.3d.up"; case .fish: return "fish"; case .motion: return "slider.horizontal.3" }
@@ -46,6 +46,7 @@ struct SettingsView: View {
     var desktopStillAction: () -> Void
     var reviewPreview: NSImage? = nil
     var reviewSection: SettingsSection? = nil
+    var reviewResidentFilter: String? = nil
     @ViewState private var section: SettingsSection = .aquarium
     @ViewState private var showReset = false
 
@@ -74,6 +75,7 @@ struct SettingsView: View {
         .foregroundStyle(Palette.text)
         .tint(Palette.accent)
         .frame(minWidth: 1000, minHeight: 750)
+        .onAppear { if let filter = reviewResidentFilter { residentFilter = filter } }
         .alert("Reset your aquarium?", isPresented: $showReset) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { store.restoreDefaults() }
@@ -93,7 +95,7 @@ struct SettingsView: View {
                     Button { section = item } label: {
                         HStack(spacing: 12) {
                             Image(systemName: item.icon).font(.system(size: 16)).frame(width: 22)
-                            Text(item.rawValue).font(.system(size: 13, weight: activeSection == item ? .semibold : .regular)).lineLimit(1)
+                            Text(item == .fish ? "Residents" : item.rawValue).font(.system(size: 13, weight: activeSection == item ? .semibold : .regular)).lineLimit(1)
                             Spacer()
                             if item == .fish { Text("\(config.totalFish)").font(.system(size: 10, weight: .medium, design: .monospaced)).foregroundStyle(Palette.muted) }
                         }
@@ -170,7 +172,7 @@ struct SettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Find your favorite corner of the water.").font(.system(size: 14, weight: .medium))
-                    Text("Three scenes, four species, endless quiet moments.").font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    Text("Three scenes, ten species, endless quiet moments.").font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer()
                 Button { section = .scenes } label: { HStack(spacing: 8) { Text("Explore scenes"); Image(systemName: "arrow.right") }.font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.accent) }.buttonStyle(.plain)
@@ -224,14 +226,29 @@ struct SettingsView: View {
         }
     }
 
+    @ViewState private var residentFilter = "All"
+    private let residentFilters = ["All", "Small fish", "Larger fish", "Shrimp & crabs"]
+    private var visibleSpecies: [FishSpecies] {
+        FishSpecies.allCases.filter { species in
+            switch residentFilter {
+            case "Small fish": return !species.isInvertebrate && species.bodySize < 90
+            case "Larger fish": return !species.isInvertebrate && species.bodySize >= 90
+            case "Shrimp & crabs": return species.isInvertebrate
+            default: return true
+            }
+        }
+    }
     private var fishPanel: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Text("Meet your little residents.").font(.system(size: 15, weight: .regular))
                 Spacer()
-                Text("\(config.totalFish) FISH IN TOTAL").font(.system(size: 9, weight: .semibold, design: .monospaced)).tracking(1).foregroundStyle(Palette.accent)
+                Text("\(config.totalFish) RESIDENTS IN TOTAL").font(.system(size: 9, weight: .semibold, design: .monospaced)).tracking(1).foregroundStyle(Palette.accent)
             }
-            ForEach(FishSpecies.allCases) { species in
+            Picker("Residents", selection: $residentFilter) {
+                ForEach(residentFilters, id: \.self) { Text($0).tag($0) }
+            }.pickerStyle(.segmented)
+            ForEach(visibleSpecies) { species in
                 HStack(spacing: 20) {
                     Image(nsImage: Artwork.fishImage(species)).resizable().aspectRatio(contentMode: .fit).frame(width: 110, height: 95)
                     VStack(alignment: .leading, spacing: 7) {
@@ -252,7 +269,11 @@ struct SettingsView: View {
                 populationButton("A lively community", counts: [12, 8, 2, 4])
                 populationButton("Just the plants", counts: [0, 0, 0, 0])
             }.padding(.top, 3)
-            Text("Each species can have 0–30 fish. Changes appear immediately.").font(.system(size: 11)).foregroundStyle(Palette.muted)
+            HStack(spacing: 12) {
+                populationButton("Colorful mix", counts: [5, 3, 1, 2, 5, 3, 1, 1, 4, 2])
+                populationButton("Bottom garden", counts: [0, 0, 0, 2, 0, 0, 0, 0, 8, 4])
+            }
+            Text("Up to 30 of each species, 120 residents in total. Changes appear immediately.").font(.system(size: 11)).foregroundStyle(Palette.muted)
         }
     }
 
@@ -260,13 +281,14 @@ struct SettingsView: View {
         Button { store.configuration.setCount(species, config.count(species) + delta) } label: {
             Image(systemName: delta < 0 ? "minus" : "plus").font(.system(size: 12, weight: .medium)).frame(width: 28, height: 30).contentShape(Rectangle())
         }.buttonStyle(.plain).foregroundStyle(Palette.accent)
-            .disabled(delta < 0 ? config.count(species) == 0 : config.count(species) == 30)
+            .disabled(delta < 0 ? config.count(species) == 0 : config.count(species) == 30 || config.totalFish >= AquariumConfiguration.populationLimit)
             .accessibilityLabel("\(delta < 0 ? "Remove" : "Add") one \(species.name)")
     }
     private func populationButton(_ title: String, counts: [Int]) -> some View {
         Button {
             var next = config
-            for (i, species) in FishSpecies.allCases.enumerated() { next.setCount(species, counts[i]) }
+            for species in FishSpecies.allCases { next.setCount(species, 0) }
+            for (i, species) in FishSpecies.allCases.enumerated() { next.setCount(species, counts.indices.contains(i) ? counts[i] : 0) }
             store.configuration = next
         } label: { Text(title).font(.system(size: 11)).padding(.horizontal, 14).padding(.vertical, 10).background(Palette.card, in: Capsule()).overlay(Capsule().stroke(Palette.border)) }
             .buttonStyle(.plain)

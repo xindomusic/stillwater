@@ -53,6 +53,7 @@ enum Artwork {
     }
     static let fishProfileRect = SIMD4<Float>(0, 0, 1, 1)
     static func fishSampleScale(_ species: FishSpecies) -> SIMD2<Float> {
+        if species.usesProfileAsset { return SIMD2(1.08, 1.08) }
         let rect = poseRect(0, species: species)
         let width: Float = species == .loach ? 0.39 : 0.335
         return SIMD2(width / rect.z, width * 2 / rect.w)
@@ -62,15 +63,18 @@ enum Artwork {
         // Copy just the profile into a compact backing store. A CGImage crop alone
         // can keep the entire eight-view atlas alive, including seven unused views.
         let profile: CGImage = autoreleasepool {
-            let url = root.appendingPathComponent("Fish/\(species.rawValue)-turns.png")
+            let suffix = species.usesProfileAsset ? "profile" : "turns"
+            let url = root.appendingPathComponent("Fish/\(species.rawValue)-\(suffix).png")
             let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)!
             let full = CGImageSourceCreateImageAtIndex(source, 0, nil)!
             let rect = poseRect(0, species: species)
-            let crop = CGRect(x: CGFloat(rect.x) * CGFloat(full.width), y: 0,
+            let crop = species.usesProfileAsset ? CGRect(x: 0, y: 0, width: full.width, height: full.height) : CGRect(x: CGFloat(rect.x) * CGFloat(full.width), y: 0,
                 width: CGFloat(rect.z) * CGFloat(full.width), height: CGFloat(full.height) / 2).integral
-            let context = CGContext(data: nil, width: Int(crop.width), height: Int(crop.height), bitsPerComponent: 8, bytesPerRow: 0,
+            let scale = species.usesProfileAsset ? min(1, 640 / max(crop.width, crop.height)) : 1
+            let context = CGContext(data: nil, width: Int(crop.width * scale), height: Int(crop.height * scale), bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(full.cropping(to: crop)!, in: CGRect(origin: .zero, size: crop.size))
+            context.interpolationQuality = .high
+            context.draw(full.cropping(to: crop)!, in: CGRect(x: 0, y: 0, width: context.width, height: context.height))
             let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
             var first = context.height, last = 0
             for y in 0..<context.height {
@@ -98,6 +102,7 @@ enum Artwork {
         case .cherry: extents = [(19,567),(614,971),(1060,1322),(1397,1727),(14,566),(614,971),(1063,1311),(1402,1749)]
         case .pearl: extents = [(26,535),(596,881),(1013,1268),(1397,1705),(16,528),(602,904),(1019,1266),(1397,1705)]
         case .loach: extents = [(17,645),(692,1050),(1107,1321),(1386,1708),(19,645),(695,1044),(1129,1297),(1408,1741)]
+        default: return SIMD4(0, 0, 1, 1)
         }
         let (left, right) = extents[index]
         return SIMD4((left - 6) / 1774, index < 4 ? 0.5 : 0, (right - left + 12) / 1774, 0.5)

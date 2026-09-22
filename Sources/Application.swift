@@ -492,6 +492,13 @@ final class DesktopWindow: NSWindow {
                 }
                 report["scenes"] = sceneReports
                 var motionConfig = store.configuration; motionConfig.bubbles = true; motionConfig.lighting = .day
+                let colorfulCounts = [5, 3, 1, 2, 5, 3, 1, 1, 4, 2]
+                motionConfig.counts = Dictionary(uniqueKeysWithValues: zip(FishSpecies.allCases, colorfulCounts).map { ($0.rawValue, $1) })
+                let community = AquariumSurface(frame: CGRect(x: 0, y: 0, width: 1600, height: 900), configuration: motionConfig)
+                community.aquarium.advanceForReview(seconds: 12); community.isPaused = true
+                guard let communityImage = community.pngData() else { throw AquariumError.snapshot }
+                try communityImage.write(to: directory.appendingPathComponent("colorful-community.png"))
+                report["communitySpecies"] = Set(community.aquarium.simulation.fish.map { $0.species.rawValue }).sorted()
                 let motion = AquariumSurface(frame: CGRect(x: 0, y: 0, width: 1200, height: 675), configuration: motionConfig)
                 motion.aquarium.advanceForReview(seconds: 20)
                 motion.aquarium.feed()
@@ -533,6 +540,17 @@ final class DesktopWindow: NSWindow {
                             if let data = bitmap.representation(using: .png, properties: [:]) {
                                 let name = section == .aquarium ? "settings" : "settings-\(section.id.replacingOccurrences(of: " ", with: "-").lowercased())"
                                 try data.write(to: directory.appendingPathComponent("\(name)\(dark ? "-dark" : "-light").png"))
+                            }
+                        }
+                    }
+                    for filter in ["Small fish", "Larger fish", "Shrimp & crabs"] {
+                        let root = SettingsView(store: store, previewAction: {}, exportAction: {}, desktopStillAction: {}, reviewPreview: preview, reviewSection: .fish, reviewResidentFilter: filter)
+                        settingsWindow?.contentView = NSHostingView(rootView: root)
+                        try await Task.sleep(for: .milliseconds(250))
+                        if let view = settingsWindow?.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                            view.cacheDisplay(in: view.bounds, to: bitmap)
+                            if let data = bitmap.representation(using: .png, properties: [:]) {
+                                try data.write(to: directory.appendingPathComponent("residents-\(filter.replacingOccurrences(of: " ", with: "-").lowercased())-\(dark ? "dark" : "light").png"))
                             }
                         }
                     }

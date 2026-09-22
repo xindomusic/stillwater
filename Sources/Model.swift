@@ -37,22 +37,44 @@ enum RenderQuality: String, Codable, CaseIterable, Identifiable {
 }
 
 enum FishSpecies: String, CaseIterable, Codable, Identifiable {
-    case rasbora, cherry, pearl, loach
+    case rasbora, cherry, pearl, loach, danio, golden, betta, koi, shrimp, crab
     var id: String { rawValue }
     var name: String {
-        switch self { case .rasbora: return "Harlequin rasbora"; case .cherry: return "Cherry barb"; case .pearl: return "Pearl gourami"; case .loach: return "Kuhli loach" }
+        switch self {
+        case .rasbora: return "Harlequin rasbora"; case .cherry: return "Cherry barb"
+        case .pearl: return "Pearl gourami"; case .loach: return "Kuhli loach"
+        case .danio: return "Celestial pearl danio"; case .golden: return "Golden barb"
+        case .betta: return "Blue betta"; case .koi: return "Kohaku koi"
+        case .shrimp: return "Cherry shrimp"; case .crab: return "Thai micro crab"
+        }
     }
     var detail: String {
-        switch self { case .rasbora: return "Copper & charcoal · gentle school"; case .cherry: return "Cherry red · curious explorer"; case .pearl: return "Pearlescent · unhurried glider"; case .loach: return "Gold & brown · sand forager" }
+        switch self {
+        case .rasbora: return "Small · copper & charcoal · gentle school"
+        case .cherry: return "Small · cherry red · curious explorer"
+        case .pearl: return "Large · pearlescent · unhurried glider"
+        case .loach: return "Medium · gold & brown · sand forager"
+        case .danio: return "Tiny · midnight blue & pearl spots"
+        case .golden: return "Medium · golden yellow · lively swimmer"
+        case .betta: return "Medium · cobalt blue · flowing fins"
+        case .koi: return "Large · ivory & vermilion · slow cruiser"
+        case .shrimp: return "Tiny · scarlet red · gentle grazer"
+        case .crab: return "Tiny · silvery sand · sideways explorer"
+        }
     }
-    var defaultCount: Int { switch self { case .rasbora: return 12; case .cherry: return 8; case .pearl: return 2; case .loach: return 4 } }
-    var bodySize: Double { switch self { case .rasbora: return 65; case .cherry: return 62; case .pearl: return 138; case .loach: return 112 } }
-    var cruiseSpeed: Double { switch self { case .rasbora: return 0.033; case .cherry: return 0.028; case .pearl: return 0.017; case .loach: return 0.015 } }
-    var legacyKey: String { switch self { case .rasbora: return "cardinal"; case .cherry: return "ember"; case .pearl: return "gourami"; case .loach: return "cory" } }
+    var defaultCount: Int { switch self { case .rasbora: return 12; case .cherry: return 8; case .pearl: return 2; case .loach: return 4; default: return 0 } }
+    var bodySize: Double { switch self { case .rasbora: return 65; case .cherry: return 62; case .pearl: return 138; case .loach: return 112; case .danio: return 46; case .golden: return 84; case .betta: return 110; case .koi: return 188; case .shrimp: return 58; case .crab: return 56 } }
+    var cruiseSpeed: Double { switch self { case .rasbora: return 0.033; case .cherry: return 0.028; case .pearl: return 0.017; case .loach: return 0.015; case .danio: return 0.030; case .golden: return 0.032; case .betta: return 0.015; case .koi: return 0.018; case .shrimp: return 0.010; case .crab: return 0.008 } }
+    var legacyKey: String { switch self { case .rasbora: return "cardinal"; case .cherry: return "ember"; case .pearl: return "gourami"; case .loach: return "cory"; default: return rawValue } }
+    var isInvertebrate: Bool { self == .shrimp || self == .crab }
+    var isBottomDweller: Bool { self == .loach || isInvertebrate }
+    var usesProfileAsset: Bool { ![Self.rasbora, .cherry, .pearl, .loach].contains(self) }
+    var renderingKind: Float { switch self { case .danio: return 1; case .pearl, .betta: return 2; case .loach: return 3; case .shrimp: return 4; case .crab: return 5; default: return 0 } }
 
 }
 
 struct AquariumConfiguration: Codable, Equatable {
+    static let populationLimit = 120
     var theme: AquariumTheme = .river
     var mode: AquariumMode = .live
     var swimmingSpeed: Double = 0.5
@@ -72,13 +94,21 @@ struct AquariumConfiguration: Codable, Equatable {
     var counts: [String: Int] = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, $0.defaultCount) })
     var totalFish: Int { FishSpecies.allCases.reduce(0) { $0 + count($1) } }
     func count(_ species: FishSpecies) -> Int { counts[species.rawValue] ?? counts[species.legacyKey] ?? species.defaultCount }
-    mutating func setCount(_ species: FishSpecies, _ count: Int) { counts[species.rawValue] = min(30, max(0, count)) }
+    mutating func setCount(_ species: FishSpecies, _ count: Int) {
+        let available = max(0, Self.populationLimit - (totalFish - self.count(species)))
+        counts[species.rawValue] = min(available, min(30, max(0, count)))
+    }
     mutating func sanitize() {
         swimmingSpeed = bounded(swimmingSpeed, 0...2, fallback: 0.5)
         plantSway = bounded(plantSway, 0...1, fallback: 0.55)
         shimmer = bounded(shimmer, 0...1, fallback: 0.2)
         brightness = bounded(brightness, 0.4...1.3, fallback: 1)
-        counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, min(30, max(0, count($0)))) })
+        var remaining = Self.populationLimit
+        counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map {
+            let value = min(remaining, min(30, max(0, count($0))))
+            remaining -= value
+            return ($0.rawValue, value)
+        })
     }
 }
 
@@ -185,9 +215,71 @@ struct FishState: Identifiable {
     var appetite = 1.0
     var feeding: FeedingResponse?
     var feedingCooldown = 0.0
+    var shrimpBehavior = ShrimpBehavior(seed: 1)
 
     var spineCurve: SIMD4<Float> {
-        stroke.spineCurve(phase: finPhase, species: species)
+        species.isInvertebrate ? .zero : stroke.spineCurve(phase: finPhase, species: species)
+    }
+
+    /// Fish keep a modest nose-up/down attitude. Rest and yaw turns level the body.
+    static func pitchTarget(species: FishSpecies, vx: Double, vy: Double, yawRate: Double) -> Double {
+        guard !species.isInvertebrate else { return 0 }
+        let limit = species.isBottomDweller ? 0.08 : 0.22
+        let moving = min(1, hypot(vx, vy) / 0.006)
+        let turning = 1 / (1 + abs(yawRate) * 2.5)
+        return max(-limit, min(limit, atan2(vy * 0.42, max(0.008, abs(vx))))) * moving * turning
+    }
+
+    static func forwardTravel(vx: Double, yaw: Double) -> Double {
+        max(0, cos(yaw) * (vx < 0 ? -1 : 1))
+    }
+}
+
+enum ShrimpPhase: String, CaseIterable { case grazing, drifting, seekingCover, hidden, emerging }
+
+/// Each shrimp alternates open exploration with a refuge near a planted edge.
+struct ShrimpBehavior {
+    private var random: AquariumRandom
+    private(set) var phase: ShrimpPhase = .grazing
+    private(set) var remaining: Double
+    private(set) var target = SIMD2<Double>(0.5, 0.1)
+    private(set) var concealment = 0.0
+    private(set) var coverOnLeft = false
+    init(seed: UInt64) {
+        random = AquariumRandom(state: seed)
+        remaining = random.value(3...11)
+    }
+    var holdsPosition: Bool { phase == .hidden || phase == .emerging }
+    var activity: Double {
+        switch phase { case .grazing: return 0.32; case .drifting: return 1.25; case .seekingCover: return 1.05; case .hidden, .emerging: return 0.01 }
+    }
+    mutating func advance(delta: Double, x: Double, y: Double, region: SwimRegion, feeding: Bool) {
+        let bedTop = region.bottom + (region.top - region.bottom) * 0.46
+        if feeding {
+            if phase != .grazing { phase = .grazing; remaining = random.value(5...12) }
+            concealment = max(0, concealment - delta * 0.65)
+            return
+        }
+        remaining -= delta
+        if phase == .seekingCover && hypot(x - target.x, (y - target.y) * 0.65) < 0.014 {
+            phase = .hidden; remaining = random.value(3...9)
+        } else if remaining <= 0 {
+            switch phase {
+            case .hidden: phase = .emerging; remaining = 2.2
+            case .grazing where random.next() < 0.55, .emerging:
+                phase = .drifting; remaining = random.value(5...12)
+                target = SIMD2(random.value((region.left + (region.right - region.left) * 0.18)...(region.right - (region.right - region.left) * 0.18)), random.value(bedTop...region.top))
+            case .grazing, .drifting:
+                phase = .seekingCover; remaining = random.value(35...55)
+                coverOnLeft = random.next() < 0.5
+                target = SIMD2(coverOnLeft ? region.left + 0.012 : region.right - 0.012, bedTop - 0.006)
+                (target.x, target.y) = region.constrain(x: target.x, y: target.y)
+            case .seekingCover:
+                phase = .grazing; remaining = random.value(4...10)
+            }
+        }
+        let hiding = phase == .hidden
+        concealment = max(0, min(1, concealment + delta * (hiding ? 0.6 : -0.65)))
     }
 }
 
@@ -368,17 +460,21 @@ struct AquariumSimulation {
     }
 
     static func region(for species: FishSpecies, theme: AquariumTheme) -> SwimRegion {
-        if species == .loach {
+        if species.isBottomDweller {
+            var bed: SwimRegion
             switch theme {
-            case .grove: return SwimRegion(left: 0.48, right: 0.78, bottom: 0.06, top: 0.115)
-            case .river: return SwimRegion(left: 0.14, right: 0.63, bottom: 0.06, top: 0.13)
-            case .spring: return SwimRegion(left: 0.26, right: 0.57, bottom: 0.06, top: 0.12)
+            case .grove: bed = SwimRegion(left: 0.48, right: 0.78, bottom: 0.06, top: 0.115)
+            case .river: bed = SwimRegion(left: 0.14, right: 0.63, bottom: 0.06, top: 0.13)
+            case .spring: bed = SwimRegion(left: 0.26, right: 0.57, bottom: 0.06, top: 0.12)
             }
+            if species == .shrimp { bed.top += 0.08 }
+            return bed
         }
         let x: (Double, Double)
         switch theme { case .grove: x = (0.43, 0.89); case .river: x = (0.19, 0.77); case .spring: x = (0.09, 0.61) }
         switch species {
-        case .pearl: return SwimRegion(left: x.0, right: x.1, bottom: 0.53, top: 0.84)
+        case .pearl, .betta: return SwimRegion(left: x.0, right: x.1, bottom: 0.53, top: 0.84)
+        case .koi: return SwimRegion(left: x.0 + 0.025, right: x.1 - 0.025, bottom: 0.32, top: 0.66)
         case .cherry: return SwimRegion(left: x.0, right: x.1, bottom: 0.27, top: 0.57)
         default: return SwimRegion(left: x.0, right: x.1, bottom: 0.39, top: 0.77)
         }
@@ -388,7 +484,10 @@ struct AquariumSimulation {
         if theme != configuration.theme {
             food.removeAll(); pendingFood.removeAll(); bubbles.removeAll(); lastDropX = nil
             theme = configuration.theme
-            for i in fish.indices { fish[i].feeding = nil }
+            for i in fish.indices {
+                fish[i].feeding = nil
+                fish[i].shrimpBehavior = ShrimpBehavior(seed: entitySeed ^ UInt64(fish[i].id) ^ 0x5A11)
+            }
         }
         if configuration.bubbles && bubbles.isEmpty {
             for _ in 0..<14 { bubbles.append(makeBubble()) }
@@ -407,10 +506,11 @@ struct AquariumSimulation {
                 fish.append(FishState(id: nextID, species: species,
                     x: birthRandom.value(r.left...r.right), y: birthRandom.value(r.bottom...r.top),
                     vx: direction * species.cruiseSpeed, vy: 0,
-                    depth: birthRandom.value(0.70...1.15), yaw: direction > 0 ? 0 : .pi, finPhase: birthRandom.value(0...6), moodRemaining: birthRandom.value(1...10)))
+                    depth: birthRandom.value(0.70...1.15), yaw: species == .crab || direction > 0 ? 0 : .pi, finPhase: birthRandom.value(0...6), moodRemaining: birthRandom.value(1...10)))
                 fish[fish.count - 1].stroke = FishStroke(seed: personalSeed ^ 0xF1A5)
                 fish[fish.count - 1].navigation = FishNavigation(seed: personalSeed ^ 0xA11CE, heading: direction > 0 ? 0 : .pi)
                 fish[fish.count - 1].behaviorRandom = AquariumRandom(state: personalSeed ^ 0xBEA710)
+                fish[fish.count - 1].shrimpBehavior = ShrimpBehavior(seed: personalSeed ^ 0x5A11)
                 nextID += 1
             }
         }
@@ -422,7 +522,7 @@ struct AquariumSimulation {
 
     private func swimmingRegion(for fish: FishState, configuration: AquariumConfiguration) -> SwimRegion {
         var r = Self.region(for: fish.species, theme: configuration.theme)
-        if fish.feeding != nil && fish.species != .loach {
+        if fish.feeding != nil && !fish.species.isBottomDweller {
             r.bottom = min(r.bottom, 0.20)
             r.top = max(r.top, 0.85)
         }
@@ -467,7 +567,7 @@ struct AquariumSimulation {
 
     mutating func feed(_ configuration: AquariumConfiguration) {
         guard configuration.mode == .live, configuration.swimmingSpeed > 0, !fish.isEmpty else { return }
-        let swimmers = fish.filter { $0.species != .loach }
+        let swimmers = fish.filter { !$0.species.isBottomDweller }
         let residents = swimmers.isEmpty ? fish : swimmers
         let species: FishSpecies = swimmers.isEmpty ? .loach : .rasbora
         let r = Self.region(for: species, theme: configuration.theme).intersecting(visibleRegion)
@@ -544,16 +644,16 @@ struct AquariumSimulation {
             f.appetite = min(1, f.appetite + movement * 0.025)
             if f.moodRemaining <= 0 || (f.mood == .feeding && food.isEmpty) {
                 let roll = f.behaviorRandom.next()
-                if roll < (f.species == .pearl ? 0.43 : 0.25) {
+                if roll < (f.species == .pearl || f.species == .betta || f.species.isInvertebrate ? 0.43 : 0.25) {
                     f.mood = .hover; f.moodRemaining = f.behaviorRandom.value(2...5)
-                } else if roll > 0.92 {
+                } else if roll > 0.92 && !f.species.isInvertebrate {
                     f.mood = .dash; f.moodRemaining = f.behaviorRandom.value(0.65...1.2)
                 } else {
-                    f.mood = f.species == .loach ? .forage : .cruise
+                    f.mood = f.species.isBottomDweller ? .forage : .cruise
                     f.moodRemaining = f.behaviorRandom.value(5...12)
                 }
             }
-            let schooling = f.species == .rasbora || f.species == .cherry
+            let schooling = f.species == .rasbora || f.species == .cherry || f.species == .golden
             if f.feeding == nil {
                 f.navigation.advance(delta: movement, x: f.x, y: f.y, region: home, resting: f.mood == .hover)
             }
@@ -561,10 +661,10 @@ struct AquariumSimulation {
             var (tx, ty) = r.constrain(x: f.x + cos(f.navigation.heading) * lookAhead,
                 y: f.y + sin(f.navigation.heading) * lookAhead / 0.65)
             if f.feeding == nil && f.feedingCooldown <= 0 && f.appetite > 0.35 {
-                let awareness = f.species == .loach ? 0.13 : 0.36
+                let awareness = f.species.isBottomDweller ? 0.13 : 0.36
                 var closest: FoodPellet?
                 var bestScore = Double.infinity
-                for pellet in food where pellet.x >= home.left && pellet.x <= home.right && pellet.y >= (f.species == .loach ? home.bottom : 0.20) {
+                for pellet in food where pellet.x >= home.left && pellet.x <= home.right && pellet.y >= (f.species.isBottomDweller ? home.bottom : 0.20) {
                     let distance = hypot(pellet.x - f.x, (pellet.y - f.y) * 0.55)
                     guard distance < awareness else { continue }
                     let claimants = fish.reduce(0) { $0 + (($1.id != f.id && $1.feeding?.targetID == pellet.id) ? 1 : 0) }
@@ -595,7 +695,7 @@ struct AquariumSimulation {
                 if beginLeaving {
                     // Scatter gently to individual resting spots before joining the group again.
                     (response.x, response.y) = home.constrain(
-                        x: f.x + f.behaviorRandom.value(-0.09...0.09), y: f.y - f.behaviorRandom.value(0.045...0.10))
+                        x: f.x + f.behaviorRandom.value(-0.09...0.09), y: f.y - f.behaviorRandom.value(f.species.isBottomDweller ? 0.004...0.012 : 0.045...0.10))
                     let inset = (home.top - home.bottom) * 0.12
                     response.y = min(home.top - inset, max(home.bottom + inset, response.y))
                     response.remaining = f.behaviorRandom.value(2.5...4.5); response.age = 0
@@ -618,14 +718,25 @@ struct AquariumSimulation {
                 }
             }
             let desiredActivity: Double
-            if f.feeding?.phase == .nibbling { desiredActivity = 0.18 }
+            if f.species == .shrimp {
+                f.shrimpBehavior.advance(delta: movement, x: f.x, y: f.y, region: home, feeding: f.feeding != nil)
+                if f.feeding == nil {
+                    switch f.shrimpBehavior.phase {
+                    case .grazing: ty = min(ty, home.bottom + (home.top - home.bottom) * 0.46)
+                    case .drifting, .seekingCover: tx = f.shrimpBehavior.target.x; ty = f.shrimpBehavior.target.y
+                    case .hidden, .emerging: tx = f.x; ty = f.y
+                    }
+                }
+            }
+            if f.species == .shrimp && f.feeding == nil { desiredActivity = f.shrimpBehavior.activity }
+            else if f.feeding?.phase == .nibbling { desiredActivity = 0.18 }
             else if f.feeding?.phase == .leaving { desiredActivity = 0.7 }
             else {
                 switch f.mood {
                 case .hover: desiredActivity = 0.035
                 case .dash: desiredActivity = 2.5
                 case .forage: desiredActivity = 0.42
-                case .feeding: desiredActivity = (f.species == .pearl ? 1.8 : 2.7) * (0.92 + f.depth * 0.13)
+                case .feeding: desiredActivity = (f.species.isInvertebrate ? 1.25 : (f.species == .pearl || f.species == .betta ? 1.8 : 2.7)) * (0.92 + f.depth * 0.13)
                 case .cruise: desiredActivity = 0.85
                 }
             }
@@ -658,10 +769,17 @@ struct AquariumSimulation {
             let response = 1 - exp(-movement * (targetFood == nil ? 1.8 : 3.2))
             f.vx += (desiredVX - f.vx) * response
             f.vy += (desiredVY - f.vy) * response
+            if f.species == .shrimp && f.feeding == nil && f.shrimpBehavior.holdsPosition {
+                f.vx *= exp(-movement * 12); f.vy *= exp(-movement * 12)
+            }
             // Heading integrates an angle through real front/rear views; it never mirrors the sprite.
-            let headingVX = targetFood == nil ? f.vx : desiredVX
+            let headingVX = desiredVX
             var requestedTurnRate = 0.0
-            if abs(headingVX) > 0.0015 && abs(headingVX) / max(0.003, hypot(f.vx, f.vy * 0.45)) > 0.25 {
+            if f.species == .crab {
+                let crawlHeading = atan2(desiredVY, desiredVX)
+                let targetYaw = sin(crawlHeading) * 0.35 + f.navigation.viewAngle * 0.5
+                requestedTurnRate = max(-0.65, min(0.65, Self.angleDifference(targetYaw, f.yaw) * 1.8))
+            } else if abs(headingVX) > 0.0015 && abs(headingVX) / max(0.003, hypot(f.vx, f.vy * 0.45)) > 0.25 {
                 let targetYaw = (headingVX >= 0 ? 0.0 : Double.pi) + (f.feeding == nil ? f.navigation.viewAngle : 0)
                 let difference = Self.angleDifference(targetYaw, f.yaw)
                 let turnLimit = f.feeding == nil ? f.navigation.turnLimit : 1.8
@@ -669,19 +787,23 @@ struct AquariumSimulation {
             }
             f.yawVelocity += (requestedTurnRate - f.yawVelocity) * (1 - exp(-movement * 10))
             f.yaw += f.yawVelocity * movement
-            let pitchLimit = f.species == .loach ? 0.35 : 0.90
-            let pitchTarget = max(-pitchLimit, min(pitchLimit, atan2(f.vy * 0.45, max(0.003, abs(f.vx)))))
-            f.pitch += (pitchTarget - f.pitch) * (1 - exp(-movement * 3.0))
-            let alignment = abs(cos(f.yaw))
-            f.x += f.vx * movement * (0.28 + 0.72 * alignment)
+            let pitchTarget = FishState.pitchTarget(species: f.species, vx: f.vx, vy: f.vy, yawRate: f.yawVelocity)
+            let pitchStep = (pitchTarget - f.pitch) * (1 - exp(-movement * 3.0))
+            f.pitch += max(-movement * 0.35, min(movement * 0.35, pitchStep))
+            // A reversal turns the head first. Never translate tail-first while yaw catches up.
+            let alignment = f.species == .crab ? 1 : FishState.forwardTravel(vx: f.vx, yaw: f.yaw)
+            f.x += f.vx * movement * alignment
             f.y += f.vy * movement
             (f.x, f.y) = r.constrain(x: f.x, y: f.y)
             let actualSpeed = hypot(f.vx, f.vy)
             f.stroke.advance(delta: movement, species: f.species, speed: actualSpeed / f.species.cruiseSpeed,
                 acceleration: (actualSpeed - previousSpeed) / (movement * f.species.cruiseSpeed),
                 turnRate: Self.angleDifference(f.yaw, previousYaw) / movement)
-            f.finPhase += movement * f.stroke.tailRate
-            let mouthX = f.x + cos(f.yaw) * f.species.bodySize * f.depth / 2300 * 0.35
+            // Reverse a crab's gait clock continuously as travel changes direction;
+            // switching the sign inside the shader would snap all eight feet.
+            let gaitDirection = f.species == .crab ? max(-1, min(1, (f.vx + f.vy * 0.45) / f.species.cruiseSpeed * 3)) : 1
+            f.finPhase += movement * f.stroke.tailRate * gaitDirection
+            let mouthX = f.x + (f.species == .crab ? 0 : cos(f.yaw) * f.species.bodySize * f.depth / 2300 * (f.species == .shrimp ? 0.18 : 0.35))
             if let targetFood, let pellet = food.first(where: { $0.id == targetFood }),
                hypot(pellet.x-mouthX, (pellet.y-f.y)*0.55) < 0.016 {
                 food.removeAll { $0.id == targetFood }; mealsEaten += 1

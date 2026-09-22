@@ -106,7 +106,7 @@ final class AquariumScene: SKScene {
             node.name = "fish-\(fish.id)"
             node.shader = fishShader
             node.setValue(SKAttributeValue(float: Float(fish.depth)), forAttribute: "a_depth")
-            node.setValue(SKAttributeValue(float: Float(FishSpecies.allCases.firstIndex(of: fish.species)!)), forAttribute: "a_species")
+            node.setValue(SKAttributeValue(float: fish.species.renderingKind), forAttribute: "a_species")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(fish.species)), forAttribute: "a_sampleScale")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(fish.species)), forAttribute: "a_visibleY")
             node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
@@ -114,7 +114,7 @@ final class AquariumScene: SKScene {
             node.size = CGSize(width: body, height: body)
             node.zPosition = CGFloat(5 + fish.depth)
             addChild(node); fishNodes[fish.id] = node
-            if fish.species == .loach {
+            if fish.species.isBottomDweller {
                 let shadow = SKSpriteNode(texture: Artwork.contactShadow)
                 shadow.zPosition = 4
                 shadow.size = CGSize(width: body * 0.72, height: body * 0.08)
@@ -173,20 +173,30 @@ final class AquariumScene: SKScene {
             let pose = wrappedYaw / (.pi / 4)
             node.poseValue.floatValue = Float(pose); node.setValue(node.poseValue, forAttribute: "a_pose")
             node.phaseValue.floatValue = Float(f.finPhase); node.setValue(node.phaseValue, forAttribute: "a_finPhase")
-            node.strokeValue.vectorFloat4Value = SIMD4(Float(f.stroke.amplitude), Float(f.stroke.bend), 0, 0)
+            node.strokeValue.vectorFloat4Value = SIMD4(Float(f.stroke.amplitude), Float(f.stroke.bend),
+                f.species == .shrimp ? Float(f.shrimpBehavior.concealment) : 0,
+                f.species == .shrimp && f.shrimpBehavior.coverOnLeft ? 1 : 0)
             node.setValue(node.strokeValue, forAttribute: "a_stroke")
             node.finsValue.vectorFloat4Value = SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.stroke.spread), Float(f.stroke.finAmplitude))
             node.setValue(node.finsValue, forAttribute: "a_fins")
             node.curveValue.vectorFloat4Value = f.spineCurve; node.setValue(node.curveValue, forAttribute: "a_curve")
             let bite: Double
-            if let response = f.feeding, response.phase == .nibbling {
+            if !f.species.isInvertebrate, let response = f.feeding, response.phase == .nibbling {
                 let envelope = min(1, response.age * 6) * min(1, max(0, response.remaining) * 6)
                 bite = sin(response.age * 18) * 0.045 * envelope
             } else { bite = 0 }
             node.zRotation = CGFloat((f.pitch + bite) * cos(f.yaw))
             // Distance changes color, never the opacity of a fish's body.
             if let shadow = fishShadows[f.id] {
-                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * 0.085)
+                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species.isInvertebrate ? 0.25 : 0.085))
+                shadow.alpha = f.species == .shrimp ? 1 - f.shrimpBehavior.concealment : 1
+                if f.species == .shrimp {
+                    let bedTop = AquariumSimulation.region(for: .loach, theme: configuration.theme).top
+                    if f.y > bedTop {
+                        shadow.position.y -= (f.y - bedTop) * (framing?.imageRect.height ?? size.height)
+                        shadow.alpha *= max(0, 1 - (f.y - bedTop) / 0.065)
+                    }
+                }
             }
         }
         let pelletIDs = Set(simulation.food.map(\.id))

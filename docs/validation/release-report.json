@@ -1,4 +1,16 @@
 {
+  "communitySpecies" : [
+    "betta",
+    "cherry",
+    "crab",
+    "danio",
+    "golden",
+    "koi",
+    "loach",
+    "pearl",
+    "rasbora",
+    "shrimp"
+  ],
   "desktopWindow" : {
     "allSpaces" : true,
     "canBecomeKey" : false,
@@ -40,13 +52,13 @@
       "real sleep\/wake",
       "native wallpaper installation"
     ],
-    "mealsEatenDuringFeedingCheck" : 7,
+    "mealsEatenDuringFeedingCheck" : 8,
     "productionFeedAction" : true,
     "sampleContext" : "Review process with production desktop windows and a visible 1120x630 preview; not a sustained power benchmark",
     "sampleDurationSecondsPerMode" : 3,
-    "sampleLiveCPUPercentOfOneCore" : 12.738888543107556,
-    "sampleLivePreviewFPS" : 29.235298888521591,
-    "sampleStillCPUPercentOfOneCore" : 0.50296892903032886,
+    "sampleLiveCPUPercentOfOneCore" : 9.0634052560545051,
+    "sampleLivePreviewFPS" : 29.990982331168514,
+    "sampleStillCPUPercentOfOneCore" : 0.7814651489130594,
     "sceneAndPopulationChangeWhileStill" : true,
     "shortcutTestScope" : "Real OS shortcut registration and dispatch through its Carbon handler; no synthetic system key presses or input monitoring",
     "stillFramesRenderedDuringSample" : 0,
@@ -56,17 +68,17 @@
   "result" : "passed",
   "scenes" : [
     {
-      "bytes" : 2694579,
+      "bytes" : 2692887,
       "fish" : 26,
       "theme" : "sunken-grove"
     },
     {
-      "bytes" : 2576360,
+      "bytes" : 2572312,
       "fish" : 26,
       "theme" : "riverlight"
     },
     {
-      "bytes" : 2933168,
+      "bytes" : 2930297,
       "fish" : 26,
       "theme" : "willow-springs"
     }
