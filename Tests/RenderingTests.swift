@@ -159,11 +159,23 @@ import UniformTypeIdentifiers
                     } else {
                         // A bent fish shows its tail fin beside the body, with real water between the
                         // fins; the body itself, around the centre of the silhouette, must stay solid.
-                        let opaque = (0..<(image.width * image.height)).filter { bytes[$0 * 4 + 3] > 128 }
-                        let cx = opaque.map { $0 % image.width }.sorted()[opaque.count / 2]
-                        let cy = opaque.map { $0 / image.width }.sorted()[opaque.count / 2]
-                        let block = (-4...4).flatMap { dy in (-4...4).map { dx in bytes[((cy + dy) * image.width + cx + dx) * 4 + 3] } }
-                        let solid = Double(block.filter { $0 > 128 }.count) / Double(block.count)
+                        let width = image.width
+                        var columns: [Int] = [], rows: [Int] = []
+                        for index in 0..<(width * image.height) where bytes[index * 4 + 3] > 128 {
+                            columns.append(index % width)
+                            rows.append(index / width)
+                        }
+                        columns.sort(); rows.sort()
+                        let cx = columns[columns.count / 2], cy = rows[rows.count / 2]
+                        var solidPixels = 0, blockPixels = 0
+                        for dy in -4...4 {
+                            for dx in -4...4 {
+                                let alpha = bytes[((cy + dy) * width + cx + dx) * 4 + 3]
+                                blockPixels += 1
+                                if alpha > 128 { solidPixels += 1 }
+                            }
+                        }
+                        let solid = Double(solidPixels) / Double(blockPixels)
                         require(solid > 0.97, "\(species) at \(Int(degrees))° bent \(bend) must keep a solid body: \(solid)")
                     }
                 }
