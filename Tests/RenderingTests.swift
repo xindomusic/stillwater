@@ -40,11 +40,9 @@ import UniformTypeIdentifiers
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.48,0.12,0,0)), forAttribute: "a_stroke")
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.7,1.2,0.5,0.65)), forAttribute: "a_fins")
                     node.setValue(SKAttributeValue(vectorFloat4: species.isInvertebrate ? .zero : SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
-                    node.setValue(SKAttributeValue(float: 0.3), forAttribute: "a_activity")
                     node.setValue(SKAttributeValue(float: pose), forAttribute: "a_pose")
                     node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
                     node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
-                    node.setValue(SKAttributeValue(vectorFloat4: Artwork.poseRect((column + 1) % 8, species: species)), forAttribute: "a_rect1")
                     node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
                     node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
                     scene.addChild(node)
@@ -71,10 +69,8 @@ import UniformTypeIdentifiers
         fixture.shader = FishRendering.makeShader(); fixture.size = scene.size; fixture.position = CGPoint(x: 64, y: 64)
         fixture.setValue(SKAttributeValue(float: 1.15), forAttribute: "a_depth")
         fixture.setValue(SKAttributeValue(float: 0), forAttribute: "a_finPhase")
-        fixture.setValue(SKAttributeValue(float: 0), forAttribute: "a_activity")
         fixture.setValue(SKAttributeValue(float: 0), forAttribute: "a_species")
         fixture.setValue(SKAttributeValue(vectorFloat4: SIMD4(0, 0, 0.5, 1)), forAttribute: "a_rect0")
-        fixture.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.5, 0, 0.5, 1)), forAttribute: "a_rect1")
         fixture.setValue(SKAttributeValue(vectorFloat2: SIMD2(0.335, 0.67)), forAttribute: "a_sampleScale")
         scene.addChild(fixture)
         for turn in [Float(0.25), 0.49, 0.5, 0.51, 0.75] {
@@ -96,7 +92,6 @@ import UniformTypeIdentifiers
             node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.48,0.12,0,0)), forAttribute: "a_stroke")
             node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.7,1.2,0.5,0.65)), forAttribute: "a_fins")
             node.setValue(SKAttributeValue(vectorFloat4: species.isInvertebrate ? .zero : SIMD4(-0.23,0.10,-0.035,0)), forAttribute: "a_curve")
-            node.setValue(SKAttributeValue(float: 0.3), forAttribute: "a_activity")
             node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
             node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
@@ -121,6 +116,46 @@ import UniformTypeIdentifiers
         }
         require(largestTurnChange > 0.001, "Turn shader must actually rotate; a fallback texture can falsely pass continuity checks")
         print("PASS: continuous turns across all former pose boundaries; largest image change \(largestTurnChange)")
+
+        // Regression: head-on views used to sample the transparent photo beyond the
+        // snout, leaving a hollow ring with the water showing through the fish.
+        var worstHole = 0.0
+        for species in FishSpecies.allCases where !species.isInvertebrate {
+            let node = SKSpriteNode(texture: Artwork.fishTexture(species))
+            node.shader = FishRendering.makeShader(); node.size = CGSize(width: 240, height: 240); node.position = CGPoint(x: 128, y: 128)
+            node.setValue(SKAttributeValue(float: 1), forAttribute: "a_depth")
+            node.setValue(SKAttributeValue(float: 0.9), forAttribute: "a_finPhase")
+            node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.48, 0, 0, 0)), forAttribute: "a_stroke")
+            node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0.7, 1.2, 0.5, 0.65)), forAttribute: "a_fins")
+            node.setValue(SKAttributeValue(float: species.renderingKind), forAttribute: "a_species")
+            node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
+            node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
+            node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
+            scene.addChild(node)
+            for degrees in [86.0, 90.0, 94.0, 266.0, 270.0, 274.0] {
+                for bend: Float in [0, -0.2] {
+                    node.setValue(SKAttributeValue(float: Float(degrees / 45)), forAttribute: "a_pose")
+                    node.setValue(SKAttributeValue(vectorFloat4: SIMD4(bend, 0.05, -0.02, 0)), forAttribute: "a_curve")
+                    let image = view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage()
+                    let bytes = Self.pixels(image)
+                    // Within the middle half of the body, count see-through pixels between opaque
+                    // edges. The outer rows are fins, whose gaps are real.
+                    let opaqueRows = (0..<image.height).filter { y in (0..<image.width).contains { bytes[(y * image.width + $0) * 4 + 3] > 128 } }
+                    guard let top = opaqueRows.first, let bottom = opaqueRows.last else { require(false, "\(species) must be visible head-on"); continue }
+                    var inside = 0, holes = 0
+                    for y in (top + (bottom - top) / 4)...(bottom - (bottom - top) / 4) {
+                        let row = (0..<image.width).map { bytes[(y * image.width + $0) * 4 + 3] }
+                        guard let first = row.firstIndex(where: { $0 > 128 }), let last = row.lastIndex(where: { $0 > 128 }), last - first > 6 else { continue }
+                        for x in (first + 3)...(last - 3) { inside += 1; if row[x] < 40 { holes += 1 } }
+                    }
+                    let fraction = Double(holes) / Double(max(1, inside))
+                    worstHole = max(worstHole, fraction)
+                    require(fraction < 0.03, "\(species) at \(Int(degrees))° (bend \(bend)) must not show water through its body: \(fraction)")
+                }
+            }
+            node.removeFromParent()
+        }
+        print("PASS: head-on turns stay solid; largest see-through fraction \(worstHole)")
 
         // Isolate motion on stationary fish so whole-sprite travel cannot hide frozen fins.
         scene.removeAllChildren(); scene.size = CGSize(width: 256, height: 256)

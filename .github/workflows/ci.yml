@@ -13,6 +13,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test simulation and settings
         run: zsh tools/test.sh
+      - name: Render shader regression checks
+        # Hosted macOS runners provide a paravirtual Metal device; SpriteKit renders offscreen.
+        run: zsh tools/test-rendering.sh build/rendering-review
       - name: Build Apple Silicon app
         run: zsh tools/build.sh
       - name: Validate bundle

@@ -6,7 +6,11 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 
 | File | Responsibility |
 | --- | --- |
-| `Sources/Model.swift` | Saved settings, species, framing, swimming/feeding states, pellet scheduling, and bubble lifecycles |
+| `Sources/Dice.swift` | Per-individual seeded dice (xoshiro256**) with uniform, normal, exponential, and log-normal draws |
+| `Sources/Configuration.swift` | Saved settings, themes, species traits, and the settings store |
+| `Sources/FishBehavior.swift` | Per-fish state and temperament, framing, navigation, shrimp steps and escapes, crab gait, and fin strokes |
+| `Sources/Simulation.swift` | The simulation step: moods, food choice, steering, banked turns, depth, pellets, and bubbles |
+| `Sources/WallpaperStills.swift` | Saved wallpaper stills and pruning of stills no display uses |
 | `Sources/AquariumScene.swift` | SpriteKit rendering, body/fin shaders, day/night fade, particles, and pause behavior |
 | `Sources/Artwork.swift` | Images, pose rectangles, cached motion masks, and contact shadows |
 | `Sources/FishRendering.swift` | Continuous curved-body projection and body/fin motion |
@@ -14,9 +18,10 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 | `Sources/BubbleRendering.swift` | Refractive bubble shading and directional highlights |
 | `Sources/WaterRendering.swift` | Masked vegetation sway, surface ripples, and moving light |
 | `Sources/SettingsView.swift` | Native light/dark settings interface |
-| `Sources/Application.swift` | Desktop windows, menus, global shortcut integration, exports, lifecycle, and native verification |
+| `Sources/Application.swift` | Desktop windows, menus, global shortcut integration, exports, and lifecycle |
+| `Sources/ReviewMode.swift` | `--review` native verification and release report |
 | `Sources/FeedingShortcut.swift` | Registration and cleanup of one global keyboard shortcut |
-| `Tests/ModelTests.swift` | Deterministic behavioral and settings checks |
+| `Tests/ModelTests.swift` | Deterministic behavioral and settings checks, as named cases that all run and all report |
 
 ## Build and test
 
@@ -47,15 +52,25 @@ These render real SpriteKit shader output. A red/blue fixture detects accidental
 
 ### Continuous fish turns
 
-The fish renderer projects one photographic profile onto a curved body with thin fin surfaces. A continuous heading rotates that surface in space; it never selects or dissolves between different pose photographs. The head leads an eased turn while a lateral spine curve bends the body and delays the tail. Two local tangent solves project that bent surface without a long ray-marching loop. The body preserves width when viewed head-on, while fin coverage follows each fin surface's local angle. This is a lightweight photographic proxy, not a complete anatomical 3D model.
+The fish renderer projects one photographic profile onto a curved body with thin fin surfaces. A continuous heading rotates that surface in space; it never selects or dissolves between different pose photographs. The head leads an eased turn while a lateral spine curve bends the body and delays the tail. Each body pixel marches a short, bounded ray (4 steps for a side view, up to 20 head-on, plus a 4-step bisection) through the bent body volume and stops at the first opaque point of the photograph. This keeps head-on views solid: a single ellipsoid intersection used to land on the transparent area beyond the snout, which showed water through the middle of a turning fish. Fin coverage follows each fin surface's local angle.
+
+A reversal is a banked U-turn rather than a spin in place. A fish keeps gliding along its body axis while its heading swings round, so its screen travel slows, passes through a three-quarter and head-on view, and speeds up in the new direction. Forward travel during the turn carries the fish nearer or farther, which changes its size a little, then it drifts back to its usual depth. Fish climb and dive along a gentle slope rather than rising vertically, and only a lasting horizontal intent flips the side a fish faces. A begun turn is finished, and a reversal swings away from the viewer when the fish is near the glass and toward it when far. A fish that spots food pivots toward it without drifting away. This is a lightweight photographic proxy, not a complete anatomical 3D model.
 
 Each fish has a separate deterministic motor stream. Stroke strength and cadence ease between irregular swimming and gliding intervals, while acceleration and steering recruit stronger strokes. Pectoral and dorsal/anal motion have separate phases; fin roots and the face stay anchored. Gouramis have a slower cadence, and loaches have more distributed body flex. These are artistic tunings, not measured kinematics of the represented species. General inspiration includes experimental work on [speed-dependent fin recruitment](https://journals.biologists.com/jeb/article/211/4/587/18045/Speed-dependent-intrinsic-caudal-fin-muscle) and [coordination of fins during turns](https://journals.biologists.com/jeb/article/204/17/2943/32831/Locomotor-function-of-the-dorsal-fin-in-teleost).
 
-Native rendering tests compare closely spaced frames around every former pose boundary, the head-on and rear views, and the full-turn wrap. They also check that unrelated source colors are never blended into a double exposure.
+Native rendering tests compare closely spaced frames around every former pose boundary, the head-on and rear views, and the full-turn wrap. A head-on check counts see-through pixels inside each fish's body. They also check that unrelated source colors are never blended into a double exposure.
+
+### Chance and individuality
+
+Every fish, shrimp, crab, bubble, and pellet owns a seeded `Dice` (xoshiro256** seeded through SplitMix64), so one individual's choices never change another's and every run can be replayed in tests. Chance follows the shapes seen in real animal movement rather than flat ranges. Waits between decisions and mood lengths are exponential: mostly short, now and then long. Course changes are normally distributed around straight ahead, with an occasional reversal. Between decisions the heading meanders in a slow, correlated drift (an Ornstein–Uhlenbeck process), so paths curve. Each fish also rolls a lasting temperament at birth (boldness, restlessness, sociability), so individuals of one species differ consistently.
+
+Wandering fish cannot turn tighter than about a third of a body length, and they push a little harder through a turn, so large, slow fish swing through a visible arc instead of pivoting while small fish still turn briskly. Rising or diving, a fish swims forward along the slope, tipping up to about 25° when it strikes at food, rather than lifting straight up.
+
+Crabs scuttle sideways in quick bursts of about half a body length, with frequent pauses. Most bursts continue the same way, some reverse, and a few are slower shuffles forward or back. Their legs step in proportion to the distance walked and rest when the crab stops. Shrimp walk in short leg-steps with pauses to pick at the sand, swim only when drifting up into the water, and dart away when a fish that would eat them (cherry and golden barbs, gouramis, bettas, koi) comes close, usually while it dives for food, then freeze for a moment. With no room on the far side of the bed, a shrimp shoots up off the sand instead. A threat ahead gives the classic backward tail flip; a threat behind, a forward dart. Loaches and danios are ignored. A fish leaving after a meal swims like a wanderer again, so it glides off instead of pivoting on the spot.
 
 ### Runtime efficiency
 
-Fish profiles are lazily copied into small, independent texture buffers; the seven unused views in each source atlas are released after decoding. The six new standalone profiles are decoded into buffers no larger than 640×640 and loaded only when used. Desktop and preview surfaces share the current scene texture. A shared 120-resident cap keeps the larger catalogue within the previous simulation population budget. Per-fish shader attribute objects and separation-position storage are reused, constant sizes and UV rectangles are set outside the frame loop, and hidden atmosphere nodes skip positioning. Food targeting uses a single pass without temporary candidate arrays. Still, hidden windows, and sleep retain their existing render-loop pause behavior.
+Fish profiles are lazily copied into small, independent texture buffers; the seven unused views in each source atlas are released after decoding. The six new standalone profiles are decoded into buffers no larger than 640×640 and loaded only when used. Desktop and preview surfaces share the current scene texture. A shared 120-resident cap keeps the larger catalogue within the previous simulation population budget. Per-fish shader attribute objects and separation-position storage are reused, constant sizes and UV rectangles are set outside the frame loop, and hidden atmosphere nodes skip positioning. Food targeting uses a single pass without temporary candidate arrays, and the number of fish chasing each pellet is kept up to date as fish choose, so a crowded feeding stays linear in the number of fish. Floating particles are textured sprites that batch into one GPU draw, and pellet and bubble shader values are reused rather than reallocated each frame. Still, hidden windows, and sleep retain their existing render-loop pause behavior.
 
 `zsh tools/benchmark.sh build/performance.json` runs a controlled probe with two visible production surfaces. It reports physical memory footprint, CPU time, frame count, and retained fish texture bytes at default and maximum populations. Run comparisons sequentially on the same machine with similar background load. This short probe does not measure sustained battery use or GPU energy.
 

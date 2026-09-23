@@ -4,8 +4,8 @@ enum FishRendering {
     static func makeShader(source: String? = nil) -> SKShader {
         let shader = SKShader(source: source ?? shaderSource)
         shader.uniforms = [SKUniform(name: "u_brightness", float: 0.95), SKUniform(name: "u_night", float: 0)]
-        shader.attributes = ["a_depth", "a_finPhase", "a_activity", "a_pose", "a_species"].map { SKAttribute(name: $0, type: .float) }
-            + ["a_rect0", "a_rect1", "a_stroke", "a_fins", "a_curve"].map { SKAttribute(name: $0, type: .vectorFloat4) }
+        shader.attributes = ["a_depth", "a_finPhase", "a_pose", "a_species"].map { SKAttribute(name: $0, type: .float) }
+            + ["a_rect0", "a_stroke", "a_fins", "a_curve"].map { SKAttribute(name: $0, type: .vectorFloat4) }
             + ["a_sampleScale", "a_visibleY"].map { SKAttribute(name: $0, type: .vectorFloat2) }
         return shader
     }
@@ -104,12 +104,17 @@ enum FishRendering {
             float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
             return vec4(rect.xy + clamp(uv, 0.002, 0.998) * rect.zw, inside, 0.0);
         }
+        // Squared, normalized distance from the bent body axis: <= 1.0 is inside the body.
+        float bodyVolume(vec3 p, vec3 center, vec3 radius, vec2 photoScale, vec4 curve) {
+            vec3 q = (vec3(p.xy, p.z - spine(p.x, photoScale, curve).x) - center) / radius;
+            return dot(q, q);
+        }
+        // Soft body edge, so the silhouette of a head-on fish stays antialiased.
+        float bodyWeight(float volume) { return 1.0 - smoothstep(0.86, 1.0, volume); }
         void main() {
             // Transparent atlas margins need no projection or fin calculations.
             float photoY = (v_tex_coord.y - 0.5) * a_sampleScale.y / a_rect0.w + 0.5;
-            if (a_visibleY.y > a_visibleY.x && (photoY < a_visibleY.x || photoY > a_visibleY.y)) {
-                gl_FragColor = vec4(0.0);
-            } else {
+            bool outsideRows = a_visibleY.y > a_visibleY.x && (photoY < a_visibleY.x || photoY > a_visibleY.y);
             // One continuous photographed surface on a curved body and thin fin plane.
             // The angle never chooses a different atlas view.
             float yaw = a_pose * 0.78539816;
@@ -132,26 +137,79 @@ enum FishRendering {
             float spineExtent = max(abs(a_curve.x) / 6.0,
                 max(abs(a_curve.x * 0.5 + a_curve.y * 0.25), abs(a_curve.x + a_curve.y + a_curve.z)));
             float projectedExtent = abs(c) * photoScale.x * 0.5 + abs(s) * (thickness + spineExtent) + 0.045;
-            if (abs((v_tex_coord.x - 0.5) * 2.0) > projectedExtent) {
+            // SpriteKit's generated fragment function cannot return early.
+            if (outsideRows || abs((v_tex_coord.x - 0.5) * 2.0) > projectedExtent) {
                 gl_FragColor = vec4(0.0);
             } else {
             vec3 center = vec3((centerUV - 0.5) * photoScale, 0.0);
             vec3 radius = vec3(extentUV * photoScale, thickness);
-            float bodyDistance = 2.0, discriminant = -1.0, A = 1.0;
-            vec2 curve = vec2(0.0);
-            // Two local tangent solves bend the actual projected surface,
-            // including its silhouette, without a per-pixel ray-marching loop.
-            for (int i = 0; i < 2; i++) {
-                float anchor = (origin + ray * min(bodyDistance, 3.0)).x;
-                curve = spine(anchor, photoScale, a_curve);
-                vec3 bentOrigin = origin - vec3(0.0, 0.0, curve.x + curve.y * (origin.x - anchor));
-                vec3 bentRay = ray - vec3(0.0, 0.0, curve.y * ray.x);
-                vec3 o = (bentOrigin - center) / radius, d = bentRay / radius;
-                A = dot(d,d); float B = dot(o,d), C = dot(o,o) - 1.0;
-                discriminant = B * B - A * C;
-                bodyDistance = (-B - sqrt(max(0.0, discriminant))) / A;
+
+            // Body: march the ray through the bent body volume and stop at the first
+            // opaque photo sample. A single ellipsoid intersection used to sample the
+            // transparent tip beyond the snout during head-on turns, leaving a hollow
+            // ring, and its linearized bend could converge to a detached second body.
+            float zLimit = thickness + spineExtent + 0.02;
+            float tNear = 0.0, tFar = 8.0;
+            bool bodyPossible = abs(origin.y - center.y) < radius.y;
+            if (abs(ray.x) > 0.0001) {
+                float t0 = (center.x - radius.x - origin.x) / ray.x, t1 = (center.x + radius.x - origin.x) / ray.x;
+                tNear = max(tNear, min(t0, t1)); tFar = min(tFar, max(t0, t1));
+            } else if (abs(origin.x - center.x) > radius.x) { bodyPossible = false; }
+            if (abs(ray.z) > 0.0001) {
+                float t0 = (-zLimit - origin.z) / ray.z, t1 = (zLimit - origin.z) / ray.z;
+                tNear = max(tNear, min(t0, t1)); tFar = min(tFar, max(t0, t1));
+            } else if (abs(origin.z) > zLimit) { bodyPossible = false; }
+            bodyPossible = bodyPossible && tFar > tNear;
+            // Steps scale with the chord through the body: about 4 for a side view, where
+            // the ray crosses only the body's thickness, up to 20 for a head-on view.
+            const int maximumSteps = 20;
+            float chord = max(0.0, tFar - tNear);
+            int bodySteps = int(clamp(ceil(chord / (thickness * 0.5)), 4.0, float(maximumSteps)));
+            float stepLength = chord / float(bodySteps);
+            float missT = tNear, hitT = -1.0;
+            if (bodyPossible) {
+                for (int i = 0; i <= maximumSteps; i++) {
+                    if (i > bodySteps) { break; }
+                    float t = tNear + stepLength * float(i);
+                    vec3 p = origin + ray * t;
+                    float weight = bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
+                    if (weight > 0.0) {
+                        vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                        if (texture2D(u_texture, uv.xy).a * uv.z * weight > 0.03) { hitT = t; break; }
+                    }
+                    missT = t;
+                }
             }
-            float finDistance = abs(ray.z) > 0.06 ? -origin.z / ray.z : bodyDistance;
+            vec4 body = vec4(0.0);
+            vec3 bodyPoint = origin;
+            if (hitT >= 0.0) {
+                // Bisect between the last empty sample and the hit for a smooth surface.
+                for (int i = 0; i < 4; i++) {
+                    float t = (missT + hitT) * 0.5;
+                    vec3 p = origin + ray * t;
+                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                    float opacity = texture2D(u_texture, uv.xy).a * uv.z * bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
+                    if (opacity > 0.03) { hitT = t; } else { missT = t; }
+                }
+                // Look a little deeper too: at grazing angles the first hit is a soft
+                // photo edge, while the flesh just behind it is fully opaque.
+                for (int i = 0; i < 2; i++) {
+                    float t = min(tFar, hitT + stepLength * 0.6 * float(i));
+                    vec3 p = origin + ray * t;
+                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                    vec4 sampleColor = texture2D(u_texture, uv.xy) * uv.z * bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
+                    if (i == 0 || sampleColor.a > body.a) { body = sampleColor; bodyPoint = p; }
+                }
+                vec3 surface = origin + ray * hitT;
+                vec2 bodyCurve = spine(surface.x, photoScale, a_curve);
+                vec3 normal = (surface - center - vec3(0.0,0.0,bodyCurve.x)) / (radius * radius);
+                normal.x -= bodyCurve.y * normal.z;
+                normal = normalize(rotation * normal);
+                body.rgb *= 0.78 + 0.24 * max(0.0, dot(normal, normalize(vec3(-0.3,0.6,0.9))));
+            }
+
+            // Fins: a thin plane that follows the same bent spine as the body.
+            float finDistance = abs(ray.z) > 0.06 ? -origin.z / ray.z : 100.0;
             float finIncidence = abs(ray.z);
             for (int i = 0; i < 3; i++) {
                 vec3 at = origin + ray * finDistance;
@@ -169,22 +227,10 @@ enum FishRendering {
             // Subpixel fins lose projected coverage smoothly as their plane turns edge-on.
             float finCoverage = smoothstep(0.025, 0.18, finIncidence);
             vec4 fin = texture2D(u_texture, finUV.xy) * finUV.z * validFin * finCoverage;
-            vec3 bodyPoint = origin + ray * min(bodyDistance, 100.0);
-            vec2 bodyPhoto = photoUV(bodyPoint, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins);
-            vec4 bodyUV = atlasUV(bodyPhoto, a_rect0);
-            vec4 body = texture2D(u_texture, bodyUV.xy) * bodyUV.z;
-            // Soften subpixel edges of the projected curved body, especially head-on loaches.
-            body *= smoothstep(0.0, a_species > 2.5 ? 0.18 : 0.14, max(0.0, discriminant) / A);
-            float hasBody = step(0.0, discriminant) * step(0.0, bodyDistance);
-            vec2 bodyCurve = spine(bodyPoint.x, photoScale, a_curve);
-            vec3 normal = (bodyPoint - center - vec3(0.0,0.0,bodyCurve.x)) / (radius * radius);
-            normal.x -= bodyCurve.y * normal.z;
-            normal = normalize(rotation * normal);
-            float light = 0.78 + 0.24 * max(0.0, dot(normal, normalize(vec3(-0.3,0.6,0.9))));
-            body.rgb *= light;
+
             vec4 color = fin;
-            if (hasBody > 0.5) {
-                color = validFin < 0.5 || bodyDistance <= finDistance + 0.001
+            if (body.a > 0.0) {
+                color = validFin < 0.5 || hitT <= finDistance + 0.001
                     ? body + fin * (1.0 - body.a) : fin + body * (1.0 - fin.a);
             }
             float waterMix = 0.025 + (1.15 - a_depth) * 0.065;
@@ -198,7 +244,6 @@ enum FishRendering {
                 color *= 1.0 - smoothstep(edge - 0.025,edge + 0.025,axis);
             }
             gl_FragColor = color * v_color_mix.a;
-            }
             }
         }
         """

@@ -1,12 +1,28 @@
 import AppKit
 import SpriteKit
 
+/// Attribute values are reused every frame instead of allocating new ones per node.
 private final class FishSprite: SKSpriteNode {
+    let depthValue = SKAttributeValue(float: 1)
     let poseValue = SKAttributeValue(float: 0)
     let phaseValue = SKAttributeValue(float: 0)
     let strokeValue = SKAttributeValue(vectorFloat4: .zero)
     let finsValue = SKAttributeValue(vectorFloat4: .zero)
     let curveValue = SKAttributeValue(vectorFloat4: .zero)
+}
+
+private final class PelletSprite: SKSpriteNode {
+    let depthValue = SKAttributeValue(float: 1)
+    let tumbleValue = SKAttributeValue(float: 0)
+    let rollValue = SKAttributeValue(float: 0)
+    let seedValue = SKAttributeValue(float: 0)
+    let edgeValue = SKAttributeValue(float: 0)
+}
+
+private final class BubbleSprite: SKSpriteNode {
+    let depthValue = SKAttributeValue(float: 1)
+    let waterRectValue = SKAttributeValue(vectorFloat4: .zero)
+    let edgeValue = SKAttributeValue(float: 0)
 }
 
 final class AquariumScene: SKScene {
@@ -16,11 +32,13 @@ final class AquariumScene: SKScene {
     private let backdrop = SKSpriteNode()
     private let shade = SKSpriteNode(color: .black, size: .zero)
     private var fishNodes: [Int: FishSprite] = [:]
-    private var foodNodes: [Int: SKSpriteNode] = [:]
+    private var foodNodes: [Int: PelletSprite] = [:]
     private var fishShadows: [Int: SKSpriteNode] = [:]
     private var framing: AquariumFraming?
-    private var motes: [SKShapeNode] = []
-    private var bubbleNodes: [SKSpriteNode] = []
+    // Sprites share one texture and batch into a single GPU draw; shape nodes would be
+    // tessellated on the CPU and drawn one by one.
+    private var motes: [SKSpriteNode] = []
+    private var bubbleNodes: [BubbleSprite] = []
     private var previousTime: TimeInterval?
     private(set) var nightAmount = 0.0
     private(set) var systemIsDark = false
@@ -44,14 +62,16 @@ final class AquariumScene: SKScene {
         shade.alpha = 0
         addChild(shade)
         for i in 0..<36 {
-            let dot = SKShapeNode(circleOfRadius: i % 4 == 0 ? 1.1 : 0.65)
-            dot.fillColor = NSColor(rgb: 0xe6effa, alpha: 0.18)
-            dot.strokeColor = .clear
+            let diameter: CGFloat = i % 4 == 0 ? 2.2 : 1.3
+            let dot = SKSpriteNode(texture: Artwork.mote, size: CGSize(width: diameter, height: diameter))
+            dot.colorBlendFactor = 1
+            dot.color = NSColor(rgb: 0xe6effa)
+            dot.alpha = 0.18
             dot.zPosition = CGFloat(i % 3) + 15
             addChild(dot); motes.append(dot)
         }
-        for i in 0..<14 {
-            let bubble = SKSpriteNode()
+        for i in 0..<AquariumSimulation.bubbleCount {
+            let bubble = BubbleSprite()
             bubble.name = "bubble-\(i)"
             bubble.shader = bubbleShader
             bubble.zPosition = 20
@@ -62,6 +82,9 @@ final class AquariumScene: SKScene {
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func didChangeSize(_ oldSize: CGSize) { layoutBackdrop(); positionContents() }
+    /// Points per unit of `FishSpecies.bodySize`; artwork is authored for a 900-point-tall scene.
+    private var artworkScale: Double { max(0.1, (framing?.imageRect.height ?? size.height) / 900) }
+
     private func layoutBackdrop() {
         guard let texture = backdrop.texture, size.width > 0, size.height > 0 else { return }
         let layout = AquariumFraming(viewport: size, image: texture.size())
@@ -70,11 +93,6 @@ final class AquariumScene: SKScene {
         backdrop.position = CGPoint(x: layout.imageRect.midX, y: layout.imageRect.midY)
         simulation.visibleRegion = layout.visibleRegion
         simulation.synchronize(configuration)
-        for fish in simulation.fish {
-            let body = fish.species.bodySize * fish.depth * max(0.1, layout.imageRect.height / 900)
-            fishNodes[fish.id]?.size = CGSize(width: body, height: body)
-            fishShadows[fish.id]?.size = CGSize(width: body * 0.72, height: body * 0.08)
-        }
         shade.size = size
         shade.position = backdrop.position
     }
@@ -105,19 +123,14 @@ final class AquariumScene: SKScene {
             let node = FishSprite(texture: Artwork.fishTexture(fish.species))
             node.name = "fish-\(fish.id)"
             node.shader = fishShader
-            node.setValue(SKAttributeValue(float: Float(fish.depth)), forAttribute: "a_depth")
             node.setValue(SKAttributeValue(float: fish.species.renderingKind), forAttribute: "a_species")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(fish.species)), forAttribute: "a_sampleScale")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(fish.species)), forAttribute: "a_visibleY")
             node.setValue(SKAttributeValue(vectorFloat4: Artwork.fishProfileRect), forAttribute: "a_rect0")
-            let body = fish.species.bodySize * fish.depth * max(0.1, (framing?.imageRect.height ?? size.height) / 900)
-            node.size = CGSize(width: body, height: body)
-            node.zPosition = CGFloat(5 + fish.depth)
             addChild(node); fishNodes[fish.id] = node
             if fish.species.isBottomDweller {
                 let shadow = SKSpriteNode(texture: Artwork.contactShadow)
                 shadow.zPosition = 4
-                shadow.size = CGSize(width: body * 0.72, height: body * 0.08)
                 addChild(shadow); fishShadows[fish.id] = shadow
             }
         }
@@ -164,10 +177,14 @@ final class AquariumScene: SKScene {
             appliedNight = nightAmount
         }
         backgroundShader.uniformNamed("u_clock")?.floatValue = Float(clock)
-        let scale = max(0.1, (framing?.imageRect.height ?? size.height) / 900)
+        let scale = artworkScale
         for f in simulation.fish {
             guard let node = fishNodes[f.id] else { continue }
+            // Depth changes during turns, so size, layering, and water tint follow it every frame.
             let body = f.species.bodySize * f.depth * scale
+            node.size = CGSize(width: body, height: body)
+            node.zPosition = CGFloat(ParticlePerspective.layer(f.depth))
+            node.depthValue.floatValue = Float(f.depth); node.setValue(node.depthValue, forAttribute: "a_depth")
             node.position = framing?.point(x: f.x, y: f.y) ?? CGPoint(x: f.x * size.width, y: f.y * size.height)
             let wrappedYaw = (f.yaw.truncatingRemainder(dividingBy: 2 * .pi) + 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi)
             let pose = wrappedYaw / (.pi / 4)
@@ -188,6 +205,7 @@ final class AquariumScene: SKScene {
             node.zRotation = CGFloat((f.pitch + bite) * cos(f.yaw))
             // Distance changes color, never the opacity of a fish's body.
             if let shadow = fishShadows[f.id] {
+                shadow.size = CGSize(width: body * 0.72, height: body * 0.08)
                 shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species.isInvertebrate ? 0.25 : 0.085))
                 shadow.alpha = f.species == .shrimp ? 1 - f.shrimpBehavior.concealment : 1
                 if f.species == .shrimp {
@@ -202,10 +220,10 @@ final class AquariumScene: SKScene {
         let pelletIDs = Set(simulation.food.map(\.id))
         for id in Array(foodNodes.keys) where !pelletIDs.contains(id) { foodNodes.removeValue(forKey: id)?.removeFromParent() }
         for pellet in simulation.food {
-            let node: SKSpriteNode
+            let node: PelletSprite
             if let existing = foodNodes[pellet.id] { node = existing }
             else {
-                node = SKSpriteNode(color: .white, size: .zero)
+                node = PelletSprite(color: .white, size: .zero)
                 node.name = "pellet-\(pellet.id)"
                 node.shader = pelletShader
                 addChild(node); foodNodes[pellet.id] = node
@@ -215,11 +233,11 @@ final class AquariumScene: SKScene {
             node.size = CGSize(width: diameter, height: diameter)
             node.zPosition = ParticlePerspective.layer(pellet.depth)
             node.alpha = CGFloat(min(1, (70 - pellet.age) / 4))
-            node.setValue(SKAttributeValue(float: Float(pellet.depth)), forAttribute: "a_depth")
-            node.setValue(SKAttributeValue(float: Float(pellet.tumble)), forAttribute: "a_tumble")
-            node.setValue(SKAttributeValue(float: Float(pellet.rotation)), forAttribute: "a_roll")
-            node.setValue(SKAttributeValue(float: Float(pellet.phase)), forAttribute: "a_seed")
-            node.setValue(SKAttributeValue(float: Float(min(0.25, 1.0 / max(1, diameter)))), forAttribute: "a_edge")
+            node.depthValue.floatValue = Float(pellet.depth); node.setValue(node.depthValue, forAttribute: "a_depth")
+            node.tumbleValue.floatValue = Float(pellet.tumble); node.setValue(node.tumbleValue, forAttribute: "a_tumble")
+            node.rollValue.floatValue = Float(pellet.rotation); node.setValue(node.rollValue, forAttribute: "a_roll")
+            node.seedValue.floatValue = Float(pellet.phase); node.setValue(node.seedValue, forAttribute: "a_seed")
+            node.edgeValue.floatValue = Float(min(0.25, 1.0 / max(1, diameter))); node.setValue(node.edgeValue, forAttribute: "a_edge")
         }
         for (i, dot) in motes.enumerated() where configuration.particles {
             let n = Double(i)
@@ -237,13 +255,14 @@ final class AquariumScene: SKScene {
             let expansion = 1 + max(0, state.y - state.originY) * 0.10
             let diameter = scale * state.radius * 2 * expansion * ParticlePerspective.scale(state.depth)
             bubble.zPosition = ParticlePerspective.layer(state.depth)
-            bubble.setValue(SKAttributeValue(float: Float(state.depth)), forAttribute: "a_depth")
+            bubble.depthValue.floatValue = Float(state.depth); bubble.setValue(bubble.depthValue, forAttribute: "a_depth")
             let wobble = sin(max(0, state.age) * 2.6 + state.phase) * 0.025
             bubble.size = CGSize(width: diameter * (1 + wobble), height: diameter / (1 + wobble))
             let imageSize = framing?.imageRect.size ?? size
             let w = Float(bubble.size.width / imageSize.width), h = Float(bubble.size.height / imageSize.height)
-            bubble.setValue(SKAttributeValue(vectorFloat4: SIMD4(Float(state.x) - w / 2, Float(state.y) - h / 2, w, h)), forAttribute: "a_waterRect")
-            bubble.setValue(SKAttributeValue(float: Float(min(0.5, 1.5 / max(1, diameter)))), forAttribute: "a_edge")
+            bubble.waterRectValue.vectorFloat4Value = SIMD4(Float(state.x) - w / 2, Float(state.y) - h / 2, w, h)
+            bubble.setValue(bubble.waterRectValue, forAttribute: "a_waterRect")
+            bubble.edgeValue.floatValue = Float(min(0.5, 1.5 / max(1, diameter))); bubble.setValue(bubble.edgeValue, forAttribute: "a_edge")
         }
     }
 

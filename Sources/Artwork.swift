@@ -39,12 +39,26 @@ enum Artwork {
         let mask = CIImage(cgImage: context.makeImage()!).clampedToExtent()
             .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 2])
             .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.5])
-        let bitmap = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(mask, from: CGRect(x: 0, y: 0, width: width, height: height))!
+        let bitmap = gpuImageContext.createCGImage(mask, from: CGRect(x: 0, y: 0, width: width, height: height))!
         let texture = SKTexture(cgImage: bitmap)
         texture.filteringMode = .linear
         regionTextures[theme] = texture
         return texture
     }
+    /// Core Image filters run on the GPU through Metal; one shared context avoids re-creating pipelines.
+    private static let gpuImageContext = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
+
+    /// A soft white dot for floating particles, tinted per sprite.
+    static let mote: SKTexture = {
+        let context = CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fillEllipse(in: CGRect(x: 1, y: 1, width: 14, height: 14))
+        let texture = SKTexture(cgImage: context.makeImage()!)
+        texture.filteringMode = .linear
+        return texture
+    }()
+
     private static var fishTextures: [FishSpecies: SKTexture] = [:]
     private static var fishYBounds: [FishSpecies: SIMD2<Float>] = [:]
     static func fishVisibleY(_ species: FishSpecies) -> SIMD2<Float> {
