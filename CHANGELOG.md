@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 — 2026-09-23
+
+- Realistic bubbles: a dense air-stone stream of about 3 mm bubbles, a fainter one farther back, and tiny plant bubbles. Speeds follow measured rise rates; larger bubbles flatten, rock, and zigzag; each shows a clear inverted centre and a silvery rim, and distant ones soften.
+- Food is now small, round, soaked micro-pellets with a wet sheen and individual tints, sinking nearly straight; distant pellets are smaller, bluer, and out of focus.
+- Fish turn like fish: the body curves into the turn head first, then the tail sweeps back past straight and settles. Small fish flick round quickly with a deep bend; koi, gouramis, loaches, and bettas swing through wide arcs. The turn pivots near the front of the body, and a swung-out tail stays visible in the middle of a turn. Koi and gouramis cruise a little faster, closer to real fish.
+- Bubble streams rise from small porous air stones bedded in the sand, releasing bubbles all along their length.
+- Crabs and loaches lie side by side on the bed instead of piling on top of each other, and betta and gourami fins stay visible when the fish faces you.
+- Residents stir the sand: loaches sifting, crabs setting off, shrimp picking, and fish taking food off the bottom kick up grains that settle, with a faint silt cloud.
+- Shrimp escape in bursts of one to three tail flips, backward and upward, rising briefly above the bed.
+- Fish no longer linger for minutes after eating before they can feed again.
+
 ## 1.2.0 — 2026-09-22
 
 - Fixed a hole through the middle of fish seen head-on during turns, and detached ghost copies during sharply bent turns. The body now marches through its bent volume to the first opaque point of the photograph, with fewer steps for side views.

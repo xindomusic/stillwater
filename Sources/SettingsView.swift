@@ -316,7 +316,7 @@ struct SettingsView: View {
                     .font(.system(size: 10)).foregroundStyle(Palette.muted)
             }.padding(18).background(Palette.card, in: RoundedRectangle(cornerRadius: 11))
             HStack(spacing: 25) {
-                Toggle("Tiny bubbles", isOn: $store.configuration.bubbles)
+                Toggle("Bubbles", isOn: $store.configuration.bubbles)
                 Toggle("Drifting particles", isOn: $store.configuration.particles)
             }.toggleStyle(.switch).font(.system(size: 12))
             HStack {

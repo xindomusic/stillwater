@@ -3,7 +3,9 @@ import SpriteKit
 enum FishRendering {
     static func makeShader(source: String? = nil) -> SKShader {
         let shader = SKShader(source: source ?? shaderSource)
-        shader.uniforms = [SKUniform(name: "u_brightness", float: 0.95), SKUniform(name: "u_night", float: 0)]
+        // `u_canvas` is the sprite's size relative to the fish: extra room so a tail swung
+        // out in a deep turn is not clipped by the sprite's edge.
+        shader.uniforms = [SKUniform(name: "u_brightness", float: 0.95), SKUniform(name: "u_night", float: 0), SKUniform(name: "u_canvas", float: 1)]
         shader.attributes = ["a_depth", "a_finPhase", "a_pose", "a_species"].map { SKAttribute(name: $0, type: .float) }
             + ["a_rect0", "a_stroke", "a_fins", "a_curve"].map { SKAttribute(name: $0, type: .vectorFloat4) }
             + ["a_sampleScale", "a_visibleY"].map { SKAttribute(name: $0, type: .vectorFloat2) }
@@ -17,6 +19,12 @@ enum FishRendering {
             float z = u * u * (curve.x + u * (curve.y + u * curve.z));
             float slope = -(2.0 * curve.x * u + 3.0 * curve.y * u * u + 4.0 * curve.z * u * u * u) / (0.76 * photoScale.x);
             return vec2(z, slope);
+        }
+        // Long, flowing fins fan out of the body's plane: the dorsal fin leans one way and the
+        // anal fin the other, more the farther they reach from the body.
+        float finFan(float x, float y, vec3 center, vec3 radius, float flare) {
+            float side = y >= center.y ? 1.0 : -1.0;
+            return flare * side * max(0.0, abs(y - center.y) - radius.y * 0.9);
         }
         float segmentDistance(vec2 point, vec2 start, vec2 end) {
             vec2 edge = end - start;
@@ -52,7 +60,7 @@ enum FishRendering {
             uv.y -= pow(max(0.0,sin(rhythm)),2.0) * 0.016 * power * lower;
             return uv;
         }
-        vec2 photoUV(vec3 p, vec2 scale, vec4 rect, float phase, float species, vec4 stroke, vec4 fins) {
+        vec2 photoUV(vec3 p, vec2 scale, vec4 rect, float phase, float species, vec4 stroke, vec4 fins, float curl) {
             vec2 uv = p.xy * 0.5 * scale / rect.zw + 0.5;
             if (species > 4.5) { return crabUV(uv,phase,stroke,fins); }
             if (species > 3.5) {
@@ -65,6 +73,14 @@ enum FishRendering {
                 uv.y += leg * cos(phase + uv.x * 31.0) * stroke.x * 0.012;
                 float feeler = (1.0 - crab) * smoothstep(0.69, 0.9, uv.x) * smoothstep(0.52, 0.65, uv.y);
                 uv.y += feeler * sin(fins.x + uv.x * 6.0) * fins.w * 0.008;
+                if (curl > 0.0 && crab < 0.5) {
+                    // Tail flip: the abdomen folds down under the body from just behind the carapace.
+                    float abdomen = 1.0 - smoothstep(0.38, 0.52, uv.x);
+                    float angle = -curl * 0.9 * abdomen;
+                    vec2 pivot = vec2(0.50, 0.46);
+                    vec2 offset = uv - pivot;
+                    uv = pivot + vec2(offset.x * cos(angle) - offset.y * sin(angle), offset.x * sin(angle) + offset.y * cos(angle));
+                }
                 return uv;
             }
             if (uv.x > 0.83) { return uv; }
@@ -113,7 +129,8 @@ enum FishRendering {
         float bodyWeight(float volume) { return 1.0 - smoothstep(0.86, 1.0, volume); }
         void main() {
             // Transparent atlas margins need no projection or fin calculations.
-            float photoY = (v_tex_coord.y - 0.5) * a_sampleScale.y / a_rect0.w + 0.5;
+            vec2 canvas = 0.5 + (v_tex_coord - 0.5) * u_canvas;
+            float photoY = (canvas.y - 0.5) * a_sampleScale.y / a_rect0.w + 0.5;
             bool outsideRows = a_visibleY.y > a_visibleY.x && (photoY < a_visibleY.x || photoY > a_visibleY.y);
             // One continuous photographed surface on a curved body and thin fin plane.
             // The angle never chooses a different atlas view.
@@ -121,7 +138,7 @@ enum FishRendering {
             float c = cos(yaw), s = sin(yaw);
             mat3 rotation = mat3(c,0.0,-s,0.0,1.0,0.0,s,0.0,c);
             mat3 inverse = mat3(c,0.0,s,0.0,1.0,0.0,-s,0.0,c);
-            vec3 origin = inverse * vec3((v_tex_coord - 0.5) * 2.0, 2.0);
+            vec3 origin = inverse * vec3((canvas - 0.5) * 2.0, 2.0);
             vec3 ray = inverse * vec3(0.0,0.0,-1.0);
             vec2 centerUV = vec2(0.59,0.49);
             vec2 extentUV = vec2(0.37,0.17);
@@ -138,7 +155,7 @@ enum FishRendering {
                 max(abs(a_curve.x * 0.5 + a_curve.y * 0.25), abs(a_curve.x + a_curve.y + a_curve.z)));
             float projectedExtent = abs(c) * photoScale.x * 0.5 + abs(s) * (thickness + spineExtent) + 0.045;
             // SpriteKit's generated fragment function cannot return early.
-            if (outsideRows || abs((v_tex_coord.x - 0.5) * 2.0) > projectedExtent) {
+            if (outsideRows || abs((canvas.x - 0.5) * 2.0) > projectedExtent) {
                 gl_FragColor = vec4(0.0);
             } else {
             vec3 center = vec3((centerUV - 0.5) * photoScale, 0.0);
@@ -174,7 +191,7 @@ enum FishRendering {
                     vec3 p = origin + ray * t;
                     float weight = bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
                     if (weight > 0.0) {
-                        vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                        vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins, a_curve.w), a_rect0);
                         if (texture2D(u_texture, uv.xy).a * uv.z * weight > 0.03) { hitT = t; break; }
                     }
                     missT = t;
@@ -187,7 +204,7 @@ enum FishRendering {
                 for (int i = 0; i < 4; i++) {
                     float t = (missT + hitT) * 0.5;
                     vec3 p = origin + ray * t;
-                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins, a_curve.w), a_rect0);
                     float opacity = texture2D(u_texture, uv.xy).a * uv.z * bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
                     if (opacity > 0.03) { hitT = t; } else { missT = t; }
                 }
@@ -196,7 +213,7 @@ enum FishRendering {
                 for (int i = 0; i < 2; i++) {
                     float t = min(tFar, hitT + stepLength * 0.6 * float(i));
                     vec3 p = origin + ray * t;
-                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
+                    vec4 uv = atlasUV(photoUV(p, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins, a_curve.w), a_rect0);
                     vec4 sampleColor = texture2D(u_texture, uv.xy) * uv.z * bodyWeight(bodyVolume(p, center, radius, photoScale, a_curve));
                     if (i == 0 || sampleColor.a > body.a) { body = sampleColor; bodyPoint = p; }
                 }
@@ -208,22 +225,52 @@ enum FishRendering {
                 body.rgb *= 0.78 + 0.24 * max(0.0, dot(normal, normalize(vec3(-0.3,0.6,0.9))));
             }
 
-            // Fins: a thin plane that follows the same bent spine as the body.
-            float finDistance = abs(ray.z) > 0.06 ? -origin.z / ray.z : 100.0;
-            float finIncidence = abs(ray.z);
-            for (int i = 0; i < 3; i++) {
-                vec3 at = origin + ray * finDistance;
-                vec2 bend = spine(at.x, photoScale, a_curve);
-                float derivative = ray.z - bend.y * ray.x;
-                finIncidence = abs(derivative) / sqrt(1.0 + bend.y * bend.y);
-                if (abs(derivative) > 0.025) { finDistance -= clamp((at.z - bend.x) / derivative, -0.6, 0.6); }
+            // Fins: a thin sheet that follows the same bent spine as the body. Scan the ray for
+            // the first place it crosses the sheet, then bisect. A single straight-line solve
+            // fails when a deeply bent tail is seen edge-on in the middle of a turn.
+            // Long, flowing fins (bettas, gouramis) flare outward away from the body instead of
+            // lying in one flat plane, so they keep some width when the fish faces the viewer.
+            float finFlare = (a_species > 1.5 && a_species < 2.5) ? 0.45 : 0.0;
+            float sheetLimit = spineExtent + 0.06 + finFlare * photoScale.y * 0.5;
+            float fNear = 0.0, fFar = 8.0;
+            if (abs(ray.x) > 0.0001) {
+                float t0 = (-0.5 * photoScale.x - origin.x) / ray.x, t1 = (0.5 * photoScale.x - origin.x) / ray.x;
+                fNear = max(fNear, min(t0, t1)); fFar = min(fFar, max(t0, t1));
+            }
+            if (abs(ray.z) > 0.0001) {
+                float t0 = (-sheetLimit - origin.z) / ray.z, t1 = (sheetLimit - origin.z) / ray.z;
+                fNear = max(fNear, min(t0, t1)); fFar = min(fFar, max(t0, t1));
+            }
+            float finDistance = 100.0, validFin = 0.0;
+            if (fFar > fNear) {
+                const int sheetSteps = 12;
+                float sheetStep = (fFar - fNear) / float(sheetSteps);
+                float previousT = fNear;
+                vec3 start = origin + ray * fNear;
+                float previousGap = start.z - spine(start.x, photoScale, a_curve).x - finFan(start.x, start.y, center, radius, finFlare);
+                for (int i = 1; i <= sheetSteps; i++) {
+                    float t = fNear + sheetStep * float(i);
+                    vec3 at = origin + ray * t;
+                    float gap = at.z - spine(at.x, photoScale, a_curve).x - finFan(at.x, at.y, center, radius, finFlare);
+                    if (previousGap * gap <= 0.0) {
+                        float lo = previousT, hi = t, loGap = previousGap;
+                        for (int k = 0; k < 5; k++) {
+                            float mid = 0.5 * (lo + hi);
+                            vec3 m = origin + ray * mid;
+                            float midGap = m.z - spine(m.x, photoScale, a_curve).x - finFan(m.x, m.y, center, radius, finFlare);
+                            if (loGap * midGap <= 0.0) { hi = mid; } else { lo = mid; loGap = midGap; }
+                        }
+                        finDistance = 0.5 * (lo + hi);
+                        validFin = 1.0;
+                        break;
+                    }
+                    previousT = t; previousGap = gap;
+                }
             }
             vec3 finPoint = origin + ray * min(finDistance, 100.0);
-            vec4 finUV = atlasUV(photoUV(finPoint, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins), a_rect0);
-            // A grazing ray may not converge to the fin surface. Reject that
-            // spurious projection instead of drawing detached duplicate fins.
-            float residual = abs(finPoint.z - spine(finPoint.x, photoScale, a_curve).x);
-            float validFin = step(finDistance, 10.0) * step(0.0, finDistance) * (1.0 - smoothstep(0.003, 0.018, residual));
+            vec2 sheetBend = spine(finPoint.x, photoScale, a_curve);
+            float finIncidence = abs(ray.z - sheetBend.y * ray.x) / sqrt(1.0 + sheetBend.y * sheetBend.y);
+            vec4 finUV = atlasUV(photoUV(finPoint, a_sampleScale, a_rect0, a_finPhase, a_species, a_stroke, a_fins, a_curve.w), a_rect0);
             // Subpixel fins lose projected coverage smoothly as their plane turns edge-on.
             float finCoverage = smoothstep(0.025, 0.18, finIncidence);
             vec4 fin = texture2D(u_texture, finUV.xy) * finUV.z * validFin * finCoverage;
@@ -239,7 +286,7 @@ enum FishRendering {
             if (a_species > 3.5 && a_species < 4.5 && a_stroke.z > 0.0) {
                 // A shrimp passes behind its refuge from the leading side. The
                 // visible part stays opaque instead of becoming a ghost silhouette.
-                float axis = mix(v_tex_coord.x,1.0 - v_tex_coord.x,a_stroke.w);
+                float axis = mix(canvas.x,1.0 - canvas.x,a_stroke.w);
                 float edge = 1.06 - a_stroke.z * 1.12;
                 color *= 1.0 - smoothstep(edge - 0.025,edge + 0.025,axis);
             }

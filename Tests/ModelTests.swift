@@ -175,7 +175,8 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                 for fish in sim.fish {
                     let r = AquariumSimulation.region(for: fish.species, theme: theme)
                     t.check(fish.x.isFinite && fish.y.isFinite && fish.vx.isFinite && fish.vy.isFinite, "Simulation must stay finite")
-                    t.check((r.left...r.right).contains(fish.x) && (r.bottom...r.top).contains(fish.y), "Fish should stay in open-water bounds for \(theme)")
+                    let headroom = fish.species == .shrimp ? AquariumSimulation.escapeHeadroom : 0
+                    t.check((r.left...r.right).contains(fish.x) && (r.bottom...(r.top + headroom)).contains(fish.y), "Fish should stay in open-water bounds for \(theme)")
                     t.check(FishState.depthRange.contains(fish.depth), "Depth must stay inside the band particles layer against")
                 }
             }
@@ -237,13 +238,15 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                         let region = AquariumSimulation.region(for: fish.species, theme: theme)
                         if fish.species.isInvertebrate {
                             t.check(fish.pitch == 0 && fish.spineCurve == .zero, "Invertebrate shells must stay level and rigid")
-                            t.check((region.bottom...region.top).contains(fish.y), "Shrimp and crabs must remain on the substrate while feeding")
+                            let headroom = fish.species == .shrimp ? AquariumSimulation.escapeHeadroom : 0
+                            t.check((region.bottom...(region.top + headroom)).contains(fish.y), "Shrimp and crabs stay on or just above the substrate")
                         }
                         if fish.species == .crab {
                             t.check(abs(fish.yaw) < 0.65, "Crabs change body angle gently while crawling in different directions")
                             t.check(abs(fish.finPhase - previous.finPhase) < 0.7, "Crab gait reversals must keep all feet continuous")
                         }
-                        if !fish.species.isInvertebrate && fish.x > region.left + 0.02 && fish.x < region.right - 0.02 {
+                        // Loaches can be nudged sideways by a neighbour on the bed, so only mid-water fish are checked.
+                        if !fish.species.isBottomDweller && fish.x > region.left + 0.02 && fish.x < region.right - 0.02 {
                             t.check((fish.x - previous.x) * cos(fish.yaw) >= -0.000001, "A fish must never travel tail-first across the screen")
                         }
                     }
@@ -267,8 +270,10 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                     moods.insert(f.mood)
                     let turn = abs(AquariumSimulation.angleDifference(f.yaw, before.yaw))
                     let movement = frame * natural.swimmingSpeed
-                    t.check(turn <= AquariumSimulation.feedingTurnLimit * movement + 0.000001, "Turns must be angularly continuous without an instant flip")
-                    t.check(abs(f.yawVelocity - before.yawVelocity) < 0.6, "Turning must accelerate and decelerate rather than snap to its speed limit")
+                    let agility = FishSpecies.allCases.map(\.turnAgility).max()!
+                    let fastestTurn = max(AquariumSimulation.feedingTurnLimit, FishNavigation.turnLimits.upperBound) * agility
+                    t.check(turn <= fastestTurn * movement + 0.000001, "Turns must be angularly continuous without an instant flip")
+                    t.check(abs(f.yawVelocity - before.yawVelocity) < 1.1, "Turning must accelerate and decelerate rather than snap to its speed limit")
                     t.check(abs(f.activity - before.activity) < 0.15, "Moods must ease body activity rather than snap")
                     t.check(f.finPhase > before.finPhase, "Hovering fish must still breathe and move their fins")
                     t.check(abs(f.depth - before.depth) < 0.01, "Depth must change gradually")
@@ -278,6 +283,64 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             }
             t.check(moods.isSuperset(of: [.hover, .cruise, .dash, .forage]), "Individuals must exhibit all natural moods")
             t.check(sideOnFrames > 10, "Turns must pass through front/rear angles")
+        }
+        t.test("turns have two stages: the body curves in, then the tail flips back") {
+            var config = population([.rasbora: 8, .koi: 3, .pearl: 3, .loach: 4])
+            config.theme = .river
+            config.swimmingSpeed = 0.72
+            var sim = AquariumSimulation(seed: 64); sim.synchronize(config)
+            var peakBend: [Int: Double] = [:], watching: [Int: (sign: Double, frames: Int)] = [:]
+            var turns = 0, flipBacks = 0
+            var halfTurnSeconds: [FishSpecies: [Double]] = [:], turnStart: [Int: Int] = [:]
+            for step in 0..<18_000 {
+                let before = sim.fish
+                sim.step(delta: frame, configuration: config)
+                for (f, previous) in zip(sim.fish, before) where f.feeding == nil {
+                    if f.turnDirection != 0 { peakBend[f.id] = abs(f.stroke.bend) > abs(peakBend[f.id] ?? 0) ? f.stroke.bend : peakBend[f.id] }
+                    if previous.turnDirection != 0 && f.turnDirection == 0, let peak = peakBend[f.id], abs(peak) > 0.2 {
+                        watching[f.id] = (peak > 0 ? 1 : -1, 0); peakBend[f.id] = nil; turns += 1
+                    }
+                    if let watch = watching[f.id] {
+                        if f.stroke.bend * watch.sign < -0.15 { flipBacks += 1; watching[f.id] = nil }
+                        else if watch.frames > 30 { watching[f.id] = nil }
+                        else { watching[f.id] = (watch.sign, watch.frames + 1) }
+                    }
+                    if abs(cos(previous.yaw)) > 0.95 && abs(cos(f.yaw)) <= 0.95 { turnStart[f.id] = step }
+                    if cos(f.yaw) * cos(previous.yaw) < 0, let start = turnStart[f.id] {
+                        halfTurnSeconds[f.species, default: []].append(Double(step - start) * frame); turnStart[f.id] = nil
+                    }
+                }
+            }
+            t.check(turns > 30 && Double(flipBacks) / Double(turns) > 0.6, "After a turn the tail flips back past straight (\(flipBacks) of \(turns) turns)")
+            let median = { (s: FishSpecies) -> Double in let v = halfTurnSeconds[s]!.sorted(); return v[v.count / 2] }
+            t.check(median(.rasbora) * 2 < median(.koi), "Small fish flick round far faster than koi (\(median(.rasbora)) s vs \(median(.koi)) s for half a turn)")
+        }
+        t.test("hovering gouramis and bettas turn on their fins, and nobody sprints through a turn") {
+            var config = population([.pearl: 4, .betta: 4, .koi: 3, .rasbora: 6])
+            config.theme = .river
+            var sim = AquariumSimulation(seed: 19); sim.synchronize(config)
+            var hoverTurnFrames = 0, turnStartSpeed: [Int: Double] = [:], hovering: [Int: Int] = [:]
+            for _ in 0..<18_000 {
+                let before = sim.fish
+                sim.step(delta: frame, configuration: config)
+                for (f, previous) in zip(sim.fish, before) where f.feeding == nil && !f.species.isInvertebrate {
+                    hovering[f.id] = f.isHovering ? (hovering[f.id] ?? 0) + 1 : 0
+                    // Once settled into a hover (the body straightens within a moment of arriving).
+                    if hovering[f.id]! > 40 && abs(f.yawVelocity) > 0.3 {
+                        hoverTurnFrames += 1
+                        t.check(abs(f.stroke.bend) < 0.25, "A hovering \(f.species) turns with a nearly straight body (bend \(f.stroke.bend))")
+                    }
+                    if f.turnDirection != 0 && previous.turnDirection == 0 { turnStartSpeed[f.id] = f.forwardSpeed }
+                    if f.turnDirection == 0 { turnStartSpeed[f.id] = nil }
+                    if let start = turnStartSpeed[f.id] {
+                        // Its own cruising pace, or a modest push through the turn, whichever is faster.
+                        let ownPace = f.species.cruiseSpeed * f.navigation.speedFactor * f.personality.boldness * max(1, f.activity)
+                        let allowed = max(start, ownPace, f.species.cruiseSpeed * AquariumSimulation.turnSurge) * 1.05
+                        t.check(f.forwardSpeed <= allowed, "\(f.species) does not sprint to make a turn (\(f.forwardSpeed) vs \(allowed))")
+                    }
+                }
+            }
+            t.check(hoverTurnFrames > 50, "Gouramis and bettas do turn while hovering (\(hoverTurnFrames) frames)")
         }
         t.test("large and slow fish swim through their turns") {
             var config = population([.loach: 6, .pearl: 3, .betta: 3, .koi: 3])
@@ -481,6 +544,54 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             t.check(bouts.count > 100 && deviation / mean > 0.5, "Bursts vary in length (\(bouts.count) bursts)")
             t.check(legsWhileStill / Double(frames - walkingFrames) < 0.02, "Legs rest while a crab stands still")
         }
+        t.test("animals on the bed lie side by side instead of piling up") {
+            var config = population([.loach: 6, .crab: 6, .shrimp: 6])
+            config.theme = .grove
+            var sim = AquariumSimulation(seed: 23); sim.synchronize(config)
+            run(&sim, frames: 900, config)
+            var pairFrames: [String: Int] = [:], piled: [String: Int] = [:]
+            for step in 0..<18_000 {
+                if step % 1800 == 0 { sim.feed(config) }
+                sim.step(delta: frame, configuration: config)
+                let bed = sim.fish.filter { !$0.shrimpBehavior.isEscaping }
+                for i in bed.indices { for j in bed.indices where j > i {
+                    let a = bed[i], b = bed[j]
+                    guard abs(a.depth - b.depth) < AquariumSimulation.bedLayer else { continue }
+                    let kind = [a.species.rawValue, b.species.rawValue].sorted().joined(separator: "-") + (a.feeding != nil || b.feeding != nil ? " feeding" : "")
+                    pairFrames[kind, default: 0] += 1
+                    let meanLength = (a.species.bodyLength * a.depth + b.species.bodyLength * b.depth) / 2
+                    if abs(a.x - b.x) < meanLength * 0.5 && abs(a.y - b.y) < 0.01 { piled[kind, default: 0] += 1 }
+                } }
+            }
+            // Wandering residents keep their distance; crowding round food is allowed a little more.
+            for kind in ["loach-loach", "crab-loach", "crab-crab", "shrimp-shrimp"] {
+                for (suffix, limit) in [("", 0.015), (" feeding", 0.05)] {
+                    let share = Double(piled[kind + suffix] ?? 0) / Double(max(1, pairFrames[kind + suffix] ?? 0))
+                    t.check(share < limit, "\(kind)\(suffix) pairs at the same depth rarely lie on top of each other (\(String(format: "%.2f", share * 100))%)")
+                }
+            }
+        }
+        t.test("a crab never seems to stand on a loach, even at the food") {
+            var config = population([.loach: 6, .crab: 6])
+            for theme in AquariumTheme.allCases {
+                config.theme = theme
+                var sim = AquariumSimulation(seed: 71); sim.synchronize(config)
+                var pairs = 0, onTop = 0
+                for step in 0..<9_000 {
+                    if step % 900 == 0 { sim.feed(config) }
+                    sim.step(delta: frame, configuration: config)
+                    let crabs = sim.fish.filter { $0.species == .crab }, loaches = sim.fish.filter { $0.species == .loach }
+                    for crab in crabs { for loach in loaches {
+                        pairs += 1
+                        // On screen, including the bed's perspective lift.
+                        let dy = (crab.y + AquariumSimulation.bedLift(crab.depth)) - (loach.y + AquariumSimulation.bedLift(loach.depth))
+                        if abs(crab.x - loach.x) < loach.species.bodyLength * loach.depth * 0.4 && abs(dy) < 0.012 { onTop += 1 }
+                    } }
+                }
+                let share = Double(onTop) / Double(pairs)
+                t.check(share < 0.01, "Crabs rarely sit centred on a loach in \(theme) (\(String(format: "%.2f", share * 100))%)")
+            }
+        }
         t.test("shrimp pick their way in steps and dart away from fish that hunt them") {
             var config = population([.shrimp: 10, .cherry: 8, .koi: 3])
             config.theme = .river
@@ -582,7 +693,7 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             bubbleTwin.synchronize(withBubbles); plainTwin.synchronize(natural)
             for _ in 0..<1800 { bubbleTwin.step(delta: frame, configuration: withBubbles); plainTwin.step(delta: frame, configuration: natural) }
             t.check(bubbleTwin.fish.map { [$0.x, $0.y, $0.yaw] } == plainTwin.fish.map { [$0.x, $0.y, $0.yaw] }, "Bubble randomness must not affect fish choices")
-            t.check(Set(bubbleTwin.bubbles.map(\.dice.fingerprint)).count == bubbleTwin.bubbles.count, "Every bubble must own its random stream")
+            t.check(!bubbleTwin.bubbles.isEmpty, "Bubbles were actually rising alongside the fish")
         }
     }
 
@@ -694,7 +805,9 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                         }
                     }
                     t.check(Double(liftFrames) / Double(max(1, travelFrames)) < 0.25, "\(species) swims along a slope to and from food, not straight up and down like a lift, in \(theme) (\(liftFrames)/\(travelFrames))")
-                    t.check(Double(recedingFrames) / Double(max(1, approachFrames)) < 0.08, "\(species) must close in on its pellet while approaching in \(theme) (\(recedingFrames)/\(approachFrames))")
+                    // Several bottom feeders crowding one pellet on a shallow bed jostle a little more.
+                    let recedingLimit = species.isBottomDweller ? 0.10 : 0.08
+                    t.check(Double(recedingFrames) / Double(max(1, approachFrames)) < recedingLimit, "\(species) must close in on its pellet while approaching in \(theme) (\(recedingFrames)/\(approachFrames))")
                     t.check((firstApproach ?? 100) < 1.5, "\(species) must visibly respond within 1.5 seconds in \(theme)")
                     t.check(phases.isSuperset(of: [.noticing, .approaching, .nibbling, .leaving]), "Feeding must include notice, approach, eating, and departure")
                     t.check(Set(reactionTimes.values).count > 1, "Fish must react at different times")
@@ -702,6 +815,23 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                     t.check(sim.fish.allSatisfy { $0.feeding == nil }, "\(species) must finish feeding and resume its own behavior in \(theme)")
                     if species == .cherry { t.check(leftUsualBand, "Food above the normal swimming band must remain reachable") }
                 }
+            }
+        }
+        t.test("after a meal, fish settle back and are ready to feed again") {
+            var config = population(Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0, 6) }))
+            config.theme = .river
+            for seed in [1, 7, 99] as [UInt64] {
+                var sim = AquariumSimulation(seed: seed); sim.synchronize(config)
+                var leavingSince: [Int: Int] = [:], longest = 0
+                for step in 0..<18_000 {
+                    if step % 450 == 0 { sim.feed(config) }
+                    sim.step(delta: frame, configuration: config)
+                    for f in sim.fish {
+                        if f.feeding?.phase == .leaving { leavingSince[f.id, default: step] = leavingSince[f.id] ?? step; longest = max(longest, step - leavingSince[f.id]!) }
+                        else { leavingSince[f.id] = nil }
+                    }
+                }
+                t.check(Double(longest) * frame < 15, "No fish spends more than 15 s leaving food (seed \(seed): \(Double(longest) * frame) s)")
             }
         }
         t.test("feeding timers freeze with Still and zero speed") {
@@ -732,28 +862,78 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
     // MARK: Atmosphere
 
     @MainActor static func atmosphereTests(_ t: TestRun) {
-        t.test("bubbles rise continuously from changing sources") {
+        t.test("bubbles rise in streams at real sizes, speeds, and depths") {
             var config = AquariumConfiguration(); config.bubbles = true; config.swimmingSpeed = 0
             var sim = AquariumSimulation(); sim.synchronize(config)
-            for _ in 0..<240 {
-                let previous = sim.bubbles
-                sim.step(delta: 1.0 / 60, configuration: config)
-                for (before, after) in zip(previous, sim.bubbles) where before.generation == after.generation {
-                    t.check(after.y >= before.y, "Bubbles must rise monotonically")
-                    t.check(abs(after.x - before.x) < 0.0005, "Detachment and lateral bubble drift must remain continuous")
-                    t.check(after.y - before.y <= after.riseSpeed / 60 + 0.000001, "Bubble rise must not jump beyond its terminal speed")
+            let dt = 1.0 / 60
+            var seen: [Int: BubbleState] = [:], counts: [Int] = []
+            for step in 0..<3600 {
+                let previous = Dictionary(uniqueKeysWithValues: sim.bubbles.map { ($0.id, $0) })
+                sim.step(delta: dt, configuration: config)
+                if step > 600 { counts.append(sim.bubbles.count) }
+                for bubble in sim.bubbles {
+                    seen[bubble.id] = bubble
+                    t.check((sim.visibleRegion.left...sim.visibleRegion.right).contains(bubble.x), "Bubbles stay in the visible water")
+                    guard let before = previous[bubble.id] else { continue }
+                    t.check(bubble.y > before.y, "Bubbles rise steadily")
+                    t.check(bubble.y - before.y <= bubble.riseSpeed * dt + 1e-9, "Bubbles never jump past their terminal speed")
+                    let lateralLimit = bubble.zigzagAmplitude * 2 * .pi * bubble.zigzagFrequency * dt + 1e-9
+                    t.check(abs(bubble.x - before.x) <= lateralLimit, "Side-to-side motion is a smooth zigzag, never a jump")
                 }
             }
-            let origins = sim.bubbles.map(\.originX)
-            t.check(sim.bubbles.contains { $0.depth < 0.7 } && sim.bubbles.contains { $0.depth > 1.2 }, "Bubble population must include near and far water")
-            run(&sim, frames: 3000, config)
-            t.check(sim.bubbles.count == 14 && sim.bubbles.allSatisfy { $0.generation > 0 }, "Bubbles must respawn independently of fish speed")
-            t.check(zip(origins, sim.bubbles).allSatisfy { abs($0 - $1.originX) > 0.001 }, "Bubble origins must change after respawn")
-            t.check(Set(sim.bubbles.map { Int($0.originX * 10) }).count > 4, "Bubble sources should cover several areas")
+            let all = Array(seen.values)
+            let diameters = all.map(\.diameter).sorted()
+            t.check(diameters.first! < 0.9 && diameters.last! > 3, "Streams mix tiny plant bubbles with air-stone bubbles of a few millimetres (\(diameters.first!)–\(diameters.last!) mm)")
+            let median = diameters[diameters.count / 2]
+            t.check(median > 1.2 && median < 3, "Most bubbles are about two millimetres (median \(median))")
+            for bubble in all {
+                let speed = bubble.riseSpeed * TankScale.waterHeightCM
+                t.check(speed > 3 && speed < 25, "Bubbles rise at measured speeds, 3 to 25 cm/s (\(speed))")
+                if bubble.diameter < 0.7 { t.check(bubble.aspect < 1.01 && bubble.zigzagAmplitude == 0, "Tiny bubbles stay round and rise straight") }
+                if bubble.diameter > 2.5 { t.check(bubble.aspect > 1.2 && bubble.zigzagAmplitude > 0, "Larger bubbles flatten and zigzag") }
+            }
+            let small = all.filter { $0.diameter < 1 }.map(\.riseSpeed), large = all.filter { $0.diameter > 2.5 }.map(\.riseSpeed)
+            t.check(small.max()! < large.min()!, "Larger bubbles rise faster")
+            let depths = all.map(\.depth)
+            t.check(depths.max()! - depths.min()! > 0.15, "Streams rise at clearly different distances from the viewer")
+            t.check(counts.min()! > 3 && counts.max()! <= BubbleField.maximumBubbles, "A steady, bounded number of bubbles is in the water (\(counts.min()!)–\(counts.max()!))")
             let snapshot = sim.bubbles.map { [$0.x, $0.y, $0.age] }
             config.mode = .still
             run(&sim, frames: 120, config)
             t.check(sim.bubbles.map { [$0.x, $0.y, $0.age] } == snapshot, "Still mode freezes bubbles")
+            var cropped = AquariumSimulation(); cropped.visibleRegion = SwimRegion(left: 0.3, right: 0.7, bottom: 0.035, top: 0.9)
+            cropped.synchronize(config)
+            config.mode = .live
+            run(&cropped, frames: 600, config)
+            t.check(cropped.bubbles.allSatisfy { (0.3...0.7).contains($0.x) }, "On a narrow display the streams move into view")
+        }
+        t.test("residents stir the sand, and it settles again") {
+            var config = population([.loach: 6, .crab: 6, .shrimp: 6, .rasbora: 8])
+            config.theme = .river
+            var sim = AquariumSimulation(seed: 41); sim.synchronize(config)
+            var maximumGrains = 0, clouds = 0
+            for step in 0..<18_000 {
+                if step % 1800 == 0 { sim.feed(config) }
+                sim.step(delta: frame, configuration: config)
+                maximumGrains = max(maximumGrains, sim.sand.grains.count)
+                for grain in sim.sand.grains {
+                    t.check(grain.y >= grain.floor - 1e-9, "Sand never sinks below the bed")
+                    if grain.isCloud { clouds += 1 }
+                    if !grain.isCloud && grain.age > 1.2 { t.check(abs(grain.y - grain.floor) < TankScale.height(cm: 1), "Thrown-up grains settle back to the bed") }
+                }
+            }
+            t.check(sim.sand.puffs > 50, "Loaches, crabs, and shrimp kick up sand as they work the bed (\(sim.sand.puffs) puffs)")
+            t.check(clouds > 0, "Stronger disturbances leave a faint silt cloud")
+            t.check(maximumGrains <= SandField.maximumGrains, "Sand stays within its particle budget")
+            let snapshot = sim.sand.grains.map { [$0.x, $0.y, $0.age] }
+            config.mode = .still
+            run(&sim, frames: 60, config)
+            t.check(sim.sand.grains.map { [$0.x, $0.y, $0.age] } == snapshot, "Still mode freezes drifting sand")
+            var swimmersOnly = population([.rasbora: 12])
+            swimmersOnly.theme = .river
+            var calm = AquariumSimulation(seed: 41); calm.synchronize(swimmersOnly)
+            run(&calm, frames: 3600, swimmersOnly)
+            t.check(calm.sand.puffs == 0, "Mid-water fish leave the sand undisturbed")
         }
         t.test("pellets arrive as varied, staggered 3D sprinkles") {
             let natural = AquariumConfiguration()

@@ -59,6 +59,133 @@ enum Artwork {
         return texture
     }()
 
+    /// A small porous air stone, partly buried: a grey cylinder shaded from a light upper band
+    /// to a darker underside, densely pitted, whose lower part fades into the sand.
+    static let airStone: SKTexture = {
+        let width = 128, height = 56
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let body = CGRect(x: 3, y: 3, width: width - 6, height: height - 8)
+        context.addPath(CGPath(roundedRect: body, cornerWidth: 20, cornerHeight: 20, transform: nil))
+        context.clip()
+        let shades = [CGColor(red: 0.16, green: 0.17, blue: 0.18, alpha: 1), CGColor(red: 0.33, green: 0.35, blue: 0.36, alpha: 1),
+                      CGColor(red: 0.50, green: 0.51, blue: 0.51, alpha: 1), CGColor(red: 0.30, green: 0.31, blue: 0.33, alpha: 1)] as CFArray
+        let cylinder = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: shades, locations: [0, 0.45, 0.72, 1])!
+        context.drawLinearGradient(cylinder, start: CGPoint(x: 0, y: body.minY), end: CGPoint(x: 0, y: body.maxY), options: [])
+        // The rounded ends turn away from the light.
+        let ends = [CGColor(gray: 0, alpha: 0.45), CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 0.45)] as CFArray
+        let endShade = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: ends, locations: [0, 0.18, 0.82, 1])!
+        context.drawLinearGradient(endShade, start: CGPoint(x: body.minX, y: 0), end: CGPoint(x: body.maxX, y: 0), options: [])
+        var dice = Dice(seed: 0xA1B5)
+        for _ in 0..<420 {
+            let r = dice.logNormal(median: 0.9, spread: 0.45)
+            context.setFillColor(CGColor(gray: dice.value(0.12...0.3), alpha: dice.value(0.35...0.7)))
+            context.fillEllipse(in: CGRect(x: dice.value(Double(body.minX)...Double(body.maxX)), y: dice.value(Double(body.minY)...Double(body.maxY)),
+                                           width: r * dice.value(0.8...1.4), height: r))
+        }
+        // A soft highlight along the top, where the light catches the cylinder.
+        context.setFillColor(CGColor(gray: 1, alpha: 0.18))
+        context.fill(CGRect(x: body.minX + 14, y: body.maxY - 11, width: body.width - 28, height: 3))
+        context.resetClip()
+        let texture = SKTexture(cgImage: context.makeImage()!)
+        texture.filteringMode = .linear
+        return texture
+    }()
+
+    /// Sand heaped against the base of an air stone: white, to be tinted with the scene's sand,
+    /// with a lumpy crest and fading away at its foot and ends so it merges into the bed.
+    static let airStoneMound: SKTexture = {
+        let width = 160, height = 40
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        var dice = Dice(seed: 0x5A4D17)
+        for x in 0..<width {
+            let u = Double(x) / Double(width - 1)
+            // A low, nearly level heap along the stone that tapers only at its outer ends.
+            let taper = min(1, min(u, 1 - u) / 0.13)
+            let crest = (20 + 2 * sin(Double(x) * 0.07 + 1.3) + dice.value(-0.8...0.8)) * taper
+            for y in 0..<height where Double(y) < crest {
+                // Opaque body, feathered only at the crest and the outer ends.
+                let edge = min(1, (crest - Double(y)) / 2.5)
+                let alpha = edge * min(1, taper * 1.4)
+                let tone = 1.0 + dice.value(-0.04...0.02)
+                context.setFillColor(CGColor(gray: min(1, tone), alpha: alpha))
+                context.fill(CGRect(x: x, y: y, width: 1, height: 1))
+            }
+        }
+        let texture = SKTexture(cgImage: context.makeImage()!)
+        texture.filteringMode = .linear
+        return texture
+    }()
+
+    private static var sandColors: [String: NSColor] = [:]
+    /// The colour of the lit sand at a point on the bed, sampled from the artwork around it.
+    static func sandColor(_ theme: AquariumTheme, x: Double, y: Double) -> NSColor {
+        let key = "\(theme.rawValue)-\(Int(x * 100))-\(Int(y * 100))"
+        if let cached = sandColors[key] { return cached }
+        let width = 192, height = 80
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        if let source = image(theme).cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+        // Memory rows run top-down; y is measured up from the bottom of the artwork.
+        let centerRow = min(height - 2, max(1, Int((1 - y) * Double(height))))
+        let centerColumn = min(width - 1, max(0, Int(x * Double(width))))
+        var samples: [[Double]] = []
+        for row in max(0, centerRow - 2)...min(height - 1, centerRow + 2) {
+            for column in max(0, centerColumn - 6)...min(width - 1, centerColumn + 6) {
+                let i = (row * width + column) * 4
+                samples.append((0..<3).map { Double(pixels[i + $0]) / 255 })
+            }
+        }
+        // The median sample: the typical sand here, not a stray pebble or highlight.
+        let sorted = samples.sorted { $0.reduce(0, +) < $1.reduce(0, +) }
+        let middle = sorted[(sorted.count / 4)..<max(sorted.count / 4 + 1, sorted.count * 3 / 4)]
+        let mean = (0..<3).map { c in middle.map { $0[c] }.reduce(0, +) / Double(middle.count) }
+        let color = NSColor(srgbRed: mean[0], green: mean[1], blue: mean[2], alpha: 1)
+        sandColors[key] = color
+        return color
+    }
+
+    /// A few irregular sand grains, lit from above, so a puff reads as sand rather than dots.
+    static let sandGrains: [SKTexture] = (0..<4).map { variant in
+        let size = 24
+        let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        var dice = Dice(seed: 0x5A4D + UInt64(variant))
+        let corners = 6 + variant % 3
+        let stretch = dice.value(0.6...1.0)
+        let path = CGMutablePath()
+        for k in 0..<corners {
+            let angle = Double(k) / Double(corners) * 2 * .pi
+            let radius = dice.value(7...11)
+            let point = CGPoint(x: 12 + cos(angle) * radius, y: 12 + sin(angle) * radius * stretch)
+            if k == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        context.addPath(path); context.clip()
+        let colors = [CGColor(gray: 1, alpha: 1), CGColor(gray: 0.62, alpha: 1)] as CFArray
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
+        context.drawLinearGradient(gradient, start: CGPoint(x: 8, y: 22), end: CGPoint(x: 16, y: 2), options: [])
+        let texture = SKTexture(cgImage: context.makeImage()!)
+        texture.filteringMode = .linear
+        return texture
+    }
+
+    /// A soft round glow that fades to transparent, for clouds of stirred-up silt.
+    static let softDot: SKTexture = {
+        let context = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 256,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let colors = [CGColor(gray: 1, alpha: 1), CGColor(gray: 1, alpha: 0.35), CGColor(gray: 1, alpha: 0)] as CFArray
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1])!
+        context.drawRadialGradient(gradient, startCenter: CGPoint(x: 32, y: 32), startRadius: 0, endCenter: CGPoint(x: 32, y: 32), endRadius: 32, options: [])
+        let texture = SKTexture(cgImage: context.makeImage()!)
+        texture.filteringMode = .linear
+        return texture
+    }()
+
     private static var fishTextures: [FishSpecies: SKTexture] = [:]
     private static var fishYBounds: [FishSpecies: SIMD2<Float>] = [:]
     static func fishVisibleY(_ species: FishSpecies) -> SIMD2<Float> {

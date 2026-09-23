@@ -145,14 +145,14 @@ enum FishSpecies: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .rasbora: return 0.033
         case .cherry: return 0.028
-        case .pearl: return 0.017
+        case .pearl: return 0.024
         case .loach: return 0.015
         case .danio: return 0.030
         case .golden: return 0.032
-        case .betta: return 0.015
-        case .koi: return 0.018
+        case .betta: return 0.017
+        case .koi: return 0.03
         case .shrimp: return 0.010
-        case .crab: return 0.008
+        case .crab: return 0.016
         }
     }
 
@@ -164,6 +164,37 @@ enum FishSpecies: String, CaseIterable, Codable, Identifiable {
         case .pearl: return "gourami"
         case .loach: return "cory"
         default: return rawValue
+        }
+    }
+
+    /// How deeply the body curves in a turn. Larger fish curve less; eel-like loaches more.
+    var bodyFlexibility: Double {
+        switch self {
+        case .loach: return 1.3
+        case .koi, .pearl, .betta: return 1.0
+        default: return 1
+        }
+    }
+
+    /// Relative turning speed. Small fish flick round several times faster than large ones.
+    var turnAgility: Double {
+        switch self {
+        case .rasbora, .cherry, .danio, .golden: return 2.0
+        case .koi: return 0.95
+        case .pearl: return 0.85
+        case .betta: return 0.9
+        case .loach: return 1.15
+        default: return 1
+        }
+    }
+
+    /// Tightest routine turn, in body lengths. Long, deep-bodied fish swing wide arcs.
+    var turnRadius: Double {
+        switch self {
+        case .koi: return 0.18
+        case .pearl, .loach: return 0.18
+        case .betta: return 0.16
+        default: return 0.12
         }
     }
 

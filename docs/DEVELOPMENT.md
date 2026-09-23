@@ -9,6 +9,8 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 | `Sources/Dice.swift` | Per-individual seeded dice (xoshiro256**) with uniform, normal, exponential, and log-normal draws |
 | `Sources/Configuration.swift` | Saved settings, themes, species traits, and the settings store |
 | `Sources/FishBehavior.swift` | Per-fish state and temperament, framing, navigation, shrimp steps and escapes, crab gait, and fin strokes |
+| `Sources/Bubbles.swift` | Tank scale, air-stone and plant bubble sources, size-dependent rise, flattening, and zigzag |
+| `Sources/Sand.swift` | Sand grains and silt clouds kicked up by residents, settling back to the bed |
 | `Sources/Simulation.swift` | The simulation step: moods, food choice, steering, banked turns, depth, pellets, and bubbles |
 | `Sources/WallpaperStills.swift` | Saved wallpaper stills and pruning of stills no display uses |
 | `Sources/AquariumScene.swift` | SpriteKit rendering, body/fin shaders, day/night fade, particles, and pause behavior |
@@ -67,6 +69,20 @@ Every fish, shrimp, crab, bubble, and pellet owns a seeded `Dice` (xoshiro256** 
 Wandering fish cannot turn tighter than about a third of a body length, and they push a little harder through a turn, so large, slow fish swing through a visible arc instead of pivoting while small fish still turn briskly. Rising or diving, a fish swims forward along the slope, tipping up to about 25° when it strikes at food, rather than lifting straight up.
 
 Crabs scuttle sideways in quick bursts of about half a body length, with frequent pauses. Most bursts continue the same way, some reverse, and a few are slower shuffles forward or back. Their legs step in proportion to the distance walked and rest when the crab stops. Shrimp walk in short leg-steps with pauses to pick at the sand, swim only when drifting up into the water, and dart away when a fish that would eat them (cherry and golden barbs, gouramis, bettas, koi) comes close, usually while it dives for food, then freeze for a moment. With no room on the far side of the bed, a shrimp shoots up off the sand instead. A threat ahead gives the classic backward tail flip; a threat behind, a forward dart. Loaches and danios are ignored. A fish leaving after a meal swims like a wanderer again, so it glides off instead of pivoting on the spot.
+
+### Bubbles, food, and sand
+
+The scene is scaled as a tank about 30 cm tall, so particles move at physical speeds. A medium air stone, drawn half bedded in open sand clear of the crab and loach beds, releases a dense curtain of bubbles of about 3 mm from pores along its length, mixed with a fine mist of sub-millimetre bubbles; a second stone sits farther back, and plant leaves release occasional tiny bubbles. Rise speed follows measured air bubbles in ordinary water (about 12 cm/s at 1 mm, levelling near 22 cm/s). Bubbles stay round below about 0.7 mm, flatten above it, and rock and zigzag above about 1.4 mm. Optically each bubble shows a clear centre with a small inverted view of the water behind, a thin dark refraction band, and a silvery totally reflected rim, brightest toward the light above.
+
+Food is slow-sinking community micro-pellets of about 1.1–2 mm, falling nearly straight at about 1–1.5 cm/s: slightly irregular soaked granules with a wet sheen and individual tints. Distant pellets and bubbles are smaller, lower in contrast, bluer, and softly out of focus.
+
+Loaches pausing to nose into the sand, crabs setting off, shrimp picking, and any fish taking food off the bottom throw up irregular sand grains that settle back, and the stronger disturbances leave a pale silt cloud. Residents lying on the bed keep apart by their actual lengths, side by side along the sand, when they share a depth, and touching bodies slide gently apart; a walking crab that meets a neighbour stops and sets off the other way. Crabs keep to the nearer part of the bed and loaches to the farther part, so they pass in front of each other rather than piling up. Air stones are drawn with sand in the scene's own colour heaped against their base. A shrimp's abdomen folds under it in each tail flip, and afterwards it sinks back nose-down.
+
+### Turning like a fish
+
+A routine turn follows the two stages measured in koi. As the turn speeds up, the head swings into it and the body curves into a C, more deeply the faster the turn; as the turn winds down, one sweep of the tail carries the body back past straight before it settles. The bend is a lightly damped spring driven by turn rate and turn acceleration, with a tail sweep when a large turn completes. Small fish flick round at up to about 230°/s with a deep bend; koi, gouramis, loaches, and bettas swing through arcs of about 0.16–0.18 body lengths at about 90–120°/s, pushing at most 1.3 times their cruise speed. Turn rates are quoted at swimming speed 0.72; the swimming-speed setting scales every motion, including turns. The fish pivots about a point in the front third of its body, so the tail swings wider than the head, and the sprite has room for a swung-out tail. Gouramis and bettas that are hovering rotate in place on their fins with a nearly straight body. The fin surface is found by scanning each ray for the bent sheet, so a curved tail stays visible edge-on in the middle of a turn. The long fins of bettas and gouramis flare outward from the body, so they keep some width when the fish faces the viewer.
+
+Sources for these values include Wu et al. 2007 (routine turns of koi), Arnott et al. 1998 (shrimp tail flips), Full & Herreid 1984 (crab walking), the PNAS 2023 study of bubble path instability, and measured bubble rise speeds.
 
 ### Runtime efficiency
 

@@ -7,11 +7,15 @@ import UniformTypeIdentifiers
     static func require(_ value: @autoclosure () -> Bool, _ message: String) {
         guard value() else { fatalError(message) }
     }
-    static func pixels(_ image: CGImage) -> [UInt8] {
-        let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+    /// RGBA bytes of `image`, optionally resampled to `side`×`side` so a check written in scene
+    /// points works whatever the display's backing scale.
+    static func pixels(_ image: CGImage, side: Int? = nil) -> [UInt8] {
+        let width = side ?? image.width, height = side ?? image.height
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        return Array(UnsafeBufferPointer(start: context.data!.assumingMemoryBound(to: UInt8.self), count: image.width * image.height * 4))
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return Array(UnsafeBufferPointer(start: context.data!.assumingMemoryBound(to: UInt8.self), count: width * height * 4))
     }
     @MainActor static func main() throws {
         let app = NSApplication.shared
@@ -133,7 +137,7 @@ import UniformTypeIdentifiers
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
             scene.addChild(node)
             for degrees in [86.0, 90.0, 94.0, 266.0, 270.0, 274.0] {
-                for bend: Float in [0, -0.2] {
+                for bend: Float in [0, -0.2, 0.5] {
                     node.setValue(SKAttributeValue(float: Float(degrees / 45)), forAttribute: "a_pose")
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(bend, 0.05, -0.02, 0)), forAttribute: "a_curve")
                     let image = view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage()
@@ -148,9 +152,20 @@ import UniformTypeIdentifiers
                         guard let first = row.firstIndex(where: { $0 > 128 }), let last = row.lastIndex(where: { $0 > 128 }), last - first > 6 else { continue }
                         for x in (first + 3)...(last - 3) { inside += 1; if row[x] < 40 { holes += 1 } }
                     }
-                    let fraction = Double(holes) / Double(max(1, inside))
-                    worstHole = max(worstHole, fraction)
-                    require(fraction < 0.03, "\(species) at \(Int(degrees))° (bend \(bend)) must not show water through its body: \(fraction)")
+                    if bend == 0 {
+                        let fraction = Double(holes) / Double(max(1, inside))
+                        worstHole = max(worstHole, fraction)
+                        require(fraction < 0.03, "\(species) at \(Int(degrees))° must not show water through its body: \(fraction)")
+                    } else {
+                        // A bent fish shows its tail fin beside the body, with real water between the
+                        // fins; the body itself, around the centre of the silhouette, must stay solid.
+                        let opaque = (0..<(image.width * image.height)).filter { bytes[$0 * 4 + 3] > 128 }
+                        let cx = opaque.map { $0 % image.width }.sorted()[opaque.count / 2]
+                        let cy = opaque.map { $0 / image.width }.sorted()[opaque.count / 2]
+                        let block = (-4...4).flatMap { dy in (-4...4).map { dx in bytes[((cy + dy) * image.width + cx + dx) * 4 + 3] } }
+                        let solid = Double(block.filter { $0 > 128 }.count) / Double(block.count)
+                        require(solid > 0.97, "\(species) at \(Int(degrees))° bent \(bend) must keep a solid body: \(solid)")
+                    }
                 }
             }
             node.removeFromParent()
@@ -168,12 +183,12 @@ import UniformTypeIdentifiers
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishSampleScale(species)), forAttribute: "a_sampleScale")
             node.setValue(SKAttributeValue(vectorFloat2: Artwork.fishVisibleY(species)), forAttribute: "a_visibleY")
             scene.addChild(node)
-            let still = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage())
+            let still = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 256)
             for finsOnly in (species == .crab ? [false] : [false, true]) {
                 node.setValue(SKAttributeValue(float: finsOnly ? 0 : 2.2), forAttribute: "a_finPhase")
                 node.setValue(SKAttributeValue(vectorFloat4: SIMD4(finsOnly ? 0 : 0.8,0,0,0)), forAttribute: "a_stroke")
                 node.setValue(SKAttributeValue(vectorFloat4: finsOnly ? SIMD4(1.7,2.4,0.5,1) : SIMD4(0,0,0.5,0)), forAttribute: "a_fins")
-                let moved = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage())
+                let moved = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 256)
                 var changes = 0, faceChanges = 0
                 for y in 0..<256 { for x in 0..<256 {
                     let p = (y * 256 + x) * 4
@@ -212,7 +227,7 @@ import UniformTypeIdentifiers
                 var coverage: [Int] = []
                 for hiding: Float in [0,0.5,1] {
                     node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0,0,hiding,0)), forAttribute: "a_stroke")
-                    let bytes = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage())
+                    let bytes = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 256)
                     coverage.append(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 128 }.count)
                 }
                 require(coverage[0] > coverage[1] && coverage[1] > 100 && coverage[2] == 0, "Refuge occlusion must conceal the shrimp progressively while visible parts stay opaque")

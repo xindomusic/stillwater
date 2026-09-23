@@ -112,6 +112,9 @@ struct FishState: Identifiable {
         self.moodRemaining = moodRemaining
     }
 
+    /// A gourami or betta resting in mid-water, which turns on its fins rather than its body.
+    var isHovering: Bool { species.isSlowGlider && mood == .hover && !isChasingFood }
+
     /// Going for food: noticing, approaching, or nibbling. A fish leaving after a meal
     /// swims like a wanderer again, so it glides away instead of pivoting on the spot.
     var isChasingFood: Bool {
@@ -163,8 +166,9 @@ enum ShrimpPhase: String, CaseIterable { case grazing, drifting, seekingCover, h
 /// walks in short leg-steps with pauses to pick at food, swims only when drifting up into
 /// the water, and flicks its tail to dart backward when a large fish comes close.
 struct ShrimpBehavior {
-    /// Length of a tail-flip escape, in movement units (about half a second at default speed).
-    static let escapeDuration = 0.3
+    /// One tail flip, in movement units. Real flips last a few hundredths of a second; this
+    /// is slowed just enough to be seen, and an escape is a burst of one to three flips.
+    static let flipDuration = 0.12
     /// Free sand a sideways dart needs, in scene widths.
     static let dartLength = 0.035
 
@@ -178,6 +182,7 @@ struct ShrimpBehavior {
     private(set) var stepping = false
     private var stepRemaining = 0.0
     private(set) var escapeRemaining = 0.0
+    private(set) var escapeDuration = 0.0
     /// Horizontal direction of the current escape: +1 right, -1 left, 0 straight up.
     private(set) var escapeDirection = 1.0
     private var escapeCooldown = 0.0
@@ -209,7 +214,10 @@ struct ShrimpBehavior {
     /// room on the far side it shoots straight up off the bed instead of into the edge.
     mutating func startle(threatDirection: Double, room: (left: Double, right: Double)) -> Bool {
         guard !holdsPosition, !isEscaping, escapeCooldown <= 0 else { return false }
-        escapeRemaining = Self.escapeDuration
+        // Mostly bursts of two, sometimes one or three.
+        let flips = [1, 1, 1, 2, 2, 2, 2, 2, 3, 3][Int(dice.next() * 10)]
+        escapeDuration = Double(flips) * Self.flipDuration
+        escapeRemaining = escapeDuration
         let away: Double = threatDirection >= 0 ? -1 : 1
         escapeDirection = (away < 0 ? room.left : room.right) > Self.dartLength ? away : 0
         escapeCooldown = dice.value(3...8)
@@ -299,6 +307,14 @@ struct CrabGait {
         direction = dice.chance(0.5) ? 0 : .pi
     }
 
+    /// Something is in the way: stop, and set off the other way on the next burst.
+    mutating func bumped() {
+        guard walking else { return }
+        walking = false
+        remaining = dice.exponential(mean: 0.5).clamped(to: 0.15...2)
+        direction = .pi - direction
+    }
+
     var velocityFactor: (x: Double, y: Double) {
         walking ? (cos(direction) * pace, sin(direction) * pace) : (0, 0)
     }
@@ -343,7 +359,7 @@ struct CrabGait {
 struct FishNavigation {
     /// Turning speed limits in radians per unit of movement. At the default swimming
     /// speed a relaxed U-turn takes roughly one and a half to three seconds.
-    static let turnLimits = 1.8...4.4
+    static let turnLimits = 2.2...5.0
     /// Mean movement between decisions for a fish of typical restlessness.
     static let meanDecisionInterval = 2.2
     static let reversalChance = 0.09
@@ -439,8 +455,13 @@ struct FishStroke {
     private(set) var dorsalPhase: Double
     private(set) var finAmplitude = 0.5
     private(set) var spread = 0.5
-    /// Whole-body C-bend while turning, in the direction of the turn.
+    /// Head-to-tail angle of the body's C-bend while turning, in radians.
     private(set) var bend = 0.0
+    private var bendVelocity = 0.0
+    /// Stiffness and damping of the bend. Underdamped, so after the body curves into a turn
+    /// the tail flips back past straight once before it settles (the two stages of a routine turn).
+    static let bendStiffness = 90.0
+    static let bendDamping = 2 * 0.45 * 90.0.squareRoot()
 
     init(seed: UInt64) {
         dice = Dice(seed: seed)
@@ -451,16 +472,27 @@ struct FishStroke {
         cadenceTarget = cadence
     }
 
+    /// The second stage of a turn: one sweep of the tail carries the body back past straight.
+    /// `turn` is the direction of the finished turn (+1 or -1).
+    mutating func sweepTailBack(turn: Double, species: FishSpecies) {
+        // Nimble small fish snap the tail back hardest.
+        bendVelocity -= turn * Self.tailSweep * species.bodyFlexibility * species.turnAgility
+    }
+    /// Bend speed of the tail sweep, in radians per movement unit.
+    static let tailSweep = 6.0
+
     /// Polynomial coefficients of the lateral spine offset consumed by `FishRendering.spine`.
     func spineCurve(phase: Double, species: FishSpecies) -> SIMD4<Float> {
         let power = amplitude * (species == .loach ? 0.25 : 0.18)
         let wave = sin(phase), follow = sin(phase - 1.4)
-        return SIMD4(Float(-bend * 0.34 + power * wave),
+        return SIMD4(Float(-bend * 0.6 + power * wave),
                      Float(power * (follow - wave) * 1.6),
                      Float(-power * follow * 0.65), 0)
     }
 
-    mutating func advance(delta: Double, species: FishSpecies, speed: Double, acceleration: Double, turnRate: Double) {
+    /// `hovering`: the fish is rotating in place on its pectoral fins, with a nearly straight body.
+    mutating func advance(delta: Double, species: FishSpecies, speed: Double, acceleration: Double, turnRate: Double,
+                          turnAcceleration: Double = 0, hovering: Bool = false) {
         guard delta > 0 else { return }
         remaining -= delta
         if remaining <= 0 {
@@ -488,7 +520,13 @@ struct FishStroke {
         pectoralPhase += delta * (5.1 + speed * 1.7) * (0.75 + finEnergy * 0.25)
         dorsalPhase += delta * (2.3 + speed * 1.1) * (1.18 - cadence * 0.18)
         spread += (min(1, 0.28 + balance * 0.52 + effort * 0.16) - spread) * ease
-        // The body bends into the turn and straightens as the turn ends.
-        bend += (max(-0.85, min(0.85, turnRate * 0.20)) - bend) * ease
+        // Stage one: as a turn speeds up, the head swings into it and the body curves into a C,
+        // more deeply the faster the turn. Stage two: as the turn slows, the tail sweeps back
+        // past straight once and the body settles. Larger fish curve less.
+        let flexibility = species.bodyFlexibility
+        let swing = (turnAcceleration * 0.07).clamped(to: -0.8...0.8)
+        let bendTarget = ((turnRate * 0.3 + swing) * flexibility * (hovering ? 0.15 : 1)).clamped(to: -1.4 * flexibility...1.4 * flexibility)
+        bendVelocity += (Self.bendStiffness * (bendTarget - bend) - Self.bendDamping * bendVelocity) * delta
+        bend += bendVelocity * delta
     }
 }
