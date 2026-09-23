@@ -8,7 +8,7 @@
     <img alt="macOS 14 or later, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-697586">
     <a href="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml"><img alt="Build and test" src="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml/badge.svg"></a>
   </p>
-  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.2.0/Stillwater-1.2.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.2.0/Stillwater-1.2.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
+  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.3.0/Stillwater-1.3.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.3.0/Stillwater-1.3.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
 </div>
 
 ![Riverlight: clear freshwater, planted river stones, and Asian freshwater fish](docs/images/riverlight.png)
@@ -25,7 +25,7 @@ Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **N
 | **Ten resident choices** | Eight fish varieties in different sizes and colors, plus cherry shrimp and Thai micro crabs. Set each population from 0–30, up to 120 total. |
 | **Responsive feeding** | Shaded pellets tumble through near and far water in staggered sprinkles. Fish notice, approach, nibble, and drift apart. |
 | **Day and night** | Follow macOS Light/Dark appearance, including its automatic schedule, or choose Day or Night. |
-| **Gentle atmosphere** | Leaf sway, rippling surface water, drifting light, optional particles, and glassy bubbles at different distances and changing sources. |
+| **Gentle atmosphere** | Leaf sway, rippling surface water, drifting light, optional particles, and streams of real-size bubbles rising from air stones in the sand. Residents stir the sand as they forage. |
 | **Your pace** | Swimming speed, brightness, and 15/30/60 fps options. Still mode freezes the scene and pauses rendering. |
 | **Desktop friendly** | Lives behind desktop icons, ignores mouse clicks, and supports the main display or all displays. |
 | **Keep a moment** | Export a display-resolution PNG or set it as a permanent macOS wallpaper. |
@@ -107,7 +107,7 @@ An enlarged shader demonstration of hovering, articulated turns, and dashing. Ca
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14 or later. The published binary is arm64. Local rendering was tested on an M4 with macOS 27; see [validation](VALIDATION.md) for coverage and limits.
 
-**First launch:** v1.2.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
+**First launch:** v1.3.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
 
 Closing settings leaves the aquarium running. **Quit Stillwater** from the fish menu to reveal your underlying wallpaper. To launch at login, add Stillwater through macOS Login Items.
 
@@ -147,7 +147,7 @@ No third-party packages are required. Build scripts target Apple Silicon and mac
 zsh tools/package.sh
 ```
 
-See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.2.0.md).
+See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.3.0.md).
 
 ## How it works
 
