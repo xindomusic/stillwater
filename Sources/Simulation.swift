@@ -80,6 +80,8 @@ struct AquariumSimulation {
     /// How far each foot sweeps back while planted, in photo texture units; must match the
     /// `crabStride` constant in the crab shader so feet stay fixed to the sand.
     static let crabStride = 0.2
+    /// A stride toward or away from the viewer is drawn foreshortened to this share of its length.
+    static let crabVerticalStride = 0.5
     /// Share of each step cycle a foot spends planted (stance), also shared with the shader.
     static let crabStance = 0.6
     /// Leg-cycle radians per movement unit for a walking shrimp.
@@ -381,11 +383,17 @@ struct AquariumSimulation {
         if f.species == .loach {
             f.burst.advance(delta: movement)
             // A loach that needs to turn around sets off and swims round rather than spinning in
-            // place, and keeps swimming until the turn is done; one that runs into a neighbour veers round it.
+            // place, and keeps swimming until the turn is done.
             let turnLeft = abs(Self.angleDifference(f.facingRight ? 0 : .pi, f.yaw))
             if f.feeding == nil {
                 if !f.burst.moving && turnLeft > 1 { f.burst.startBurst() }
-                if turnLeft > 0.5 { f.burst.hold(0.15) } else if isBlockedOnBed(f, heading: cos(f.yaw), lookahead: f.species.bodyLength * f.depth * 0.8) { f.burst.swerve() }
+                // A turn-around swims back into the lane it came from; only a dart straight
+                // ahead is checked against the neighbours in that lane.
+                let wasSidestepping = f.burst.sidestepping
+                if turnLeft > 0.5 && !f.burst.sidestepping { f.burst.hold(0.15) } else { keepDartLaneClear(&f, home: home, movement: movement) }
+                // A sidestep ends where it ends, without a lurch forward as the drive dies away.
+                if wasSidestepping && !f.burst.moving { f.activity = min(f.activity, 0.4) }
+                if f.burst.moving && !f.burst.justSetOff { f.parkedFor = 0 } else { f.parkedFor += movement }
             }
             f.siftClock += movement
             let sifting = f.feeding == nil && !f.burst.moving && f.mood != .hover
@@ -395,7 +403,12 @@ struct AquariumSimulation {
         if f.species == .crab {
             f.crabGait.advance(delta: movement, x: f.x, y: f.y, region: home)
             // (A sidestep up or down the bed is not blocked by what lies to either side.)
-            if f.crabGait.walking && abs(cos(f.crabGait.direction)) > 0.5 && isBlockedOnBed(f, heading: cos(f.crabGait.direction)) { f.crabGait.bumped() }
+            if f.crabGait.walking {
+                let direction = f.crabGait.direction
+                let blocked = abs(cos(direction)) > 0.5 ? isBlockedOnBed(f, heading: cos(direction))
+                    : !bedIsClearAcross(f, up: sin(direction) > 0, home: home)
+                if blocked { f.crabGait.bumped() }
+            }
             // Away from food, the gait alone decides where a crab walks.
             if f.feeding == nil { goal.x = f.x; goal.y = f.y }
         }
@@ -431,7 +444,8 @@ struct AquariumSimulation {
             let length = max(1e-6, hypot(nx, ny))
             f.legAxisX = nx / length; f.legAxisY = ny / length
         }
-        let along = tx * f.legAxisX + ty * f.legAxisY
+        // Vertical travel is drawn foreshortened, so the legs cycle further for it.
+        let along = tx * f.legAxisX + ty * f.legAxisY / Self.crabVerticalStride
         // Capped below half a cycle per update, so even at the fastest settings the legs never strobe.
         let step = along / (Self.crabStride / Self.crabStance) * 2 * .pi
         f.finPhase += step.clamped(to: -0.9 * .pi...0.9 * .pi)
@@ -608,13 +622,96 @@ struct AquariumSimulation {
         }
     }
 
-        /// Whether a neighbour on the bed lies just ahead, within `lookahead` beyond touching. A loach
+        /// A loach never darts into a neighbour. Setting off with someone close ahead in its lane, it
+    /// goes the other way if that lane is clear, or takes a short hop toward whichever side has
+    /// more room; boxed in on both sides for long, it sidesteps to another lane. A neighbour
+    /// moving into the lane during a dart ends the dart, and the loach coasts to a stop short of it.
+    private func keepDartLaneClear(_ f: inout FishState, home: SwimRegion, movement: Double) {
+        guard f.burst.moving else { return }
+        let ahead = f.facingRight ? 1.0 : -1.0
+        let length = f.species.bodyLength * f.depth
+        if f.burst.justSetOff {
+            guard bedFreeDistance(f, heading: ahead) < length * 0.8 else { return }
+            // Turning back needs clear sand behind, including beside the lane, and a loach that
+            // has just turned does not turn straight back again.
+            // A loach boxed in for a long while turns back at the first chance, whatever it did last.
+            let boxedLong = f.parkedFor > 3
+            if bedFreeDistance(f, heading: -ahead, lane: boxedLong ? 0.025 : 0.04) >= length * 0.8 && (f.sinceLastTurn > 2.5 || boxedLong) {
+                turnBack(&f)
+                return
+            }
+            // Otherwise step across to another lane, toward the side with more sand if it is
+            // clear, else the other side; boxed in on both, wait. Boxed in for long, it squeezes
+            // through a narrower gap, and at last turns back and swims round regardless.
+            let up = f.y < (home.top + home.bottom) / 2
+            let margin = boxedLong ? 0.018 : 0.03
+            if bedIsClearAcross(f, up: up, home: home, margin: margin) {
+                f.burst.sidestep(up: up)
+            } else if bedIsClearAcross(f, up: !up, home: home, margin: margin) {
+                f.burst.sidestep(up: !up)
+            } else if f.parkedFor > 6 {
+                turnBack(&f)
+            } else {
+                f.burst.stop()
+            }
+        } else if f.burst.sidestepping {
+            // A sidestep stops short of anyone lying in the lane it is moving into.
+            if !bedIsClearAcross(f, up: f.burst.bearing > 0, home: home, margin: 0.02) { f.burst.stop() }
+        } else if bedFreeDistance(f, heading: ahead, lane: abs(f.burst.bearing) > 0.3 ? 0.04 : nil) < length * 0.8 {
+            // Coasting to a stop covers about a third of a body length; a dart veering across
+            // the bed also minds the next lane.
+            f.burst.stop()
+        }
+    }
+
+    /// Whether a bed resident can move `up` (or down) the bed without landing on a neighbour:
+    /// nobody overlapping it side to side lies within `margin` (a crab: half as much again) in
+    /// that direction.
+    private func bedIsClearAcross(_ f: FishState, up: Bool, home: SwimRegion, margin: Double = 0.03) -> Bool {
+        let room = up ? home.top - f.y : f.y - home.bottom
+        guard room > 0.03 else { return false }
+        return !neighbors.contains { other in
+            guard other.id != f.id, other.species.isBottomDweller else { return false }
+            let reach = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5
+            guard abs(other.x - f.x) < reach else { return false }
+            let gap = Self.bedGap(other.y, other.depth, f.y, f.depth) * (up ? 1 : -1)
+            return gap > -0.01 && gap < margin * (other.species == .crab ? 1.5 : 1)
+        }
+    }
+
+    private func turnBack(_ f: inout FishState) {
+        f.facingRight.toggle()
+        f.navigation.turnBack()
+        f.reversalUrge = 0
+        if f.turnDirection != 0 { f.lastTurnDirection = f.turnDirection; f.sinceLastTurn = 0 }
+        f.turnDirection = 0
+    }
+
+    /// Whether `other` lies in the same lane on the bed as `f`: a loach gives a crab a wider berth
+    /// than another loach, and a crab a loach likewise.
+    private static func sharesLane(_ f: FishState, _ other: Neighbor, lane: Double? = nil) -> Bool {
+        guard other.species.isBottomDweller,
+              abs(other.depth - f.depth) < bedLayer || crabAndLoach(f.species, other.species) else { return false }
+        let tolerance = lane ?? (crabAndLoach(f.species, other.species) && f.species != other.species ? 0.035
+            : (f.species == .loach && other.species == .loach ? 0.025 : 0.015))
+        return abs(bedGap(f.y, f.depth, other.y, other.depth)) < tolerance
+    }
+
+    /// Clear sand ahead of `f` in its lane before the nearest neighbour's edge, in scene widths.
+    private func bedFreeDistance(_ f: FishState, heading: Double, lane: Double? = nil) -> Double {
+        neighbors.reduce(Double.infinity) { free, other in
+            guard other.id != f.id, Self.sharesLane(f, other, lane: lane) else { return free }
+            let reach = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5
+            let ahead = (other.x - f.x) * heading
+            return ahead > 0 ? min(free, ahead - reach) : free
+        }
+    }
+
+    /// Whether a neighbour on the bed lies just ahead, within `lookahead` beyond touching. A loach
     /// gives a crab a wider berth, so it never slips under the crab's legs.
     private func isBlockedOnBed(_ f: FishState, heading: Double, lookahead: Double = 0) -> Bool {
         neighbors.contains { other in
-            guard other.id != f.id, other.species.isBottomDweller,
-                  abs(other.depth - f.depth) < Self.bedLayer || Self.crabAndLoach(f.species, other.species),
-                  abs(Self.bedGap(f.y, f.depth, other.y, other.depth)) < (f.species == .loach && other.species == .crab ? 0.035 : 0.015) else { return false }
+            guard other.id != f.id, Self.sharesLane(f, other) else { return false }
             let reach = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 + lookahead
             let ahead = (other.x - f.x) * heading
             return ahead > 0 && ahead < reach
@@ -627,7 +724,18 @@ struct AquariumSimulation {
     /// keep a little more room, so two never read as one long fish lying nose to tail, but crowd
     /// in at food.
     static func bedReachX(_ a: FishSpecies, _ b: FishSpecies, feeding: Bool = false) -> Double {
-        a == .loach && b == .loach && !feeding ? 1.2 : 0.9
+        if feeding { return 0.9 }
+        if a == .loach && b == .loach { return 1.35 }
+        // A loach keeps its snout clear of a crab's spread legs.
+        if crabAndLoach(a, b) && (a == .loach || b == .loach) { return 1.1 }
+        return 0.9
+    }
+
+    /// How far apart two bed residents are, as a share of the room they keep (1 = just clear).
+    /// A loach and a crab keep a box of room, so a loach never lies diagonally with its snout
+    /// across the crab's spread legs; other pairs keep an ellipse.
+    static func bedSeparation(_ a: FishSpecies, _ b: FishSpecies, _ x: Double, _ y: Double) -> Double {
+        crabAndLoach(a, b) && a != b ? max(abs(x), abs(y)) : hypot(x, y)
     }
 
     /// A crab away from food holds its ground; a loach that meets it goes round it, and is not
@@ -644,7 +752,7 @@ struct AquariumSimulation {
             && (abs(other.depth - f.depth) < Self.bedLayer || Self.keepApartAtAnyDepth(f.species, other.species)) {
             let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * Self.bedReachX(f.species, other.species, feeding: f.isChasingFood)
             let sx = f.x - other.x, sy = Self.bedGap(f.y, f.depth, other.y, other.depth)
-            let gap = hypot(sx / reachX, sy / Self.bedReachY(f.species, other.species))
+            let gap = Self.bedSeparation(f.species, other.species, sx / reachX, sy / Self.bedReachY(f.species, other.species))
             guard gap < 1 else { continue }
             let side: Double = sx != 0 ? (sx > 0 ? 1 : -1) : (f.id < other.id ? -1 : 1)
             push += side * (1 - gap)
@@ -717,7 +825,7 @@ struct AquariumSimulation {
                 let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * Self.bedReachX(f.species, other.species, feeding: f.isChasingFood)
                 let reachY = Self.bedReachY(f.species, other.species)
                 let bedY = Self.bedGap(f.y, f.depth, other.y, other.depth)
-                let gap = hypot(sx / reachX, bedY / reachY)
+                let gap = Self.bedSeparation(f.species, other.species, sx / reachX, bedY / reachY)
                 if gap < 1 {
                     // While feeding they crowd in, but never lie right on top of one another.
                     let feedingPush = Self.crabAndLoach(f.species, other.species) ? (f.species == other.species ? 0.12 : 0.2)
@@ -754,8 +862,13 @@ struct AquariumSimulation {
         var desiredVX = dx / distance * speed, desiredVY = dy / distance * speed
         if f.species == .loach && f.feeding == nil && f.burst.moving {
             // Each dart veers a little, so the path over the sand arcs rather than running on rails.
-            let c = cos(f.burst.bearing), s = sin(f.burst.bearing)
-            (desiredVX, desiredVY) = (desiredVX * c - desiredVY * s, desiredVX * s + desiredVY * c)
+            if f.burst.sidestepping {
+                // A sidestep heads straight up or down the bed, whichever way the loach faces.
+                (desiredVX, desiredVY) = (0, (f.burst.bearing > 0 ? 1 : -1) * hypot(desiredVX, desiredVY))
+            } else {
+                let c = cos(f.burst.bearing), s = sin(f.burst.bearing)
+                (desiredVX, desiredVY) = (desiredVX * c - desiredVY * s, desiredVX * s + desiredVY * c)
+            }
         }
         let previousSpeed = hypot(f.vx, f.vy)
         let previousYaw = f.yaw, previousYawVelocity = f.yawVelocity
@@ -856,7 +969,10 @@ struct AquariumSimulation {
         chooseFacing(&f, desiredVX: desiredVX, movement: movement)
         // A resting loach lies at a slight angle of its own rather than parallel to its neighbours.
         let restingLoach = f.species == .loach && f.feeding == nil && !f.burst.moving
-        let targetYaw = (f.facingRight ? 0 : Double.pi) + (f.isChasingFood ? 0 : f.navigation.viewAngle) + (restingLoach ? f.burst.restYaw : 0)
+        // Stepping across to another lane, a loach angles its body toward it and crawls diagonally.
+        let acrossYaw = f.species == .loach && f.feeding == nil && f.burst.sidestepping
+            ? (f.burst.bearing > 0 ? 0.5 : -0.5) * (f.facingRight ? 1 : -1) : 0
+        let targetYaw = (f.facingRight ? 0 : Double.pi) + (f.isChasingFood ? 0 : f.navigation.viewAngle) + (restingLoach ? f.burst.restYaw : 0) + acrossYaw
         var turnLimit = (f.isChasingFood ? Self.feedingTurnLimit : f.navigation.turnLimit) * f.species.turnAgility
         // Gouramis and bettas can hover and rotate slowly on their fins with a nearly straight body.
         let hoverTurn = f.isHovering
@@ -891,7 +1007,8 @@ struct AquariumSimulation {
         let bursting = f.species == .loach && f.feeding == nil && f.burst.moving
         if bursting {
             // A wriggling loach drives forward at the burst's full pace, and keeps swimming through a turn.
-            forwardTarget = max(forwardTarget, hypot(desiredVX, desiredVY) * max(0.5, alignment))
+            let drive = hypot(desiredVX, desiredVY) * max(0.5, alignment)
+            forwardTarget = min(max(forwardTarget, drive), f.species.cruiseSpeed * 12)
         }
         let turningAround = abs(cos(f.yaw)) < 0.5 || abs(Self.angleDifference(targetYaw, f.yaw)) > 1
         let sifting = f.species == .loach && f.feeding == nil && !f.burst.moving
@@ -906,14 +1023,17 @@ struct AquariumSimulation {
         // When the goal is nearly straight above or below, either facing will do.
         let mostlyVertical = abs(desiredVY) > abs(desiredVX) * 2
         let slopeAlignment = mostlyVertical ? abs(cos(f.yaw)) : alignment
-        if !f.species.isInvertebrate && slopeAlignment > 0 {
+        let sidestepping = bursting && f.burst.sidestepping
+        if !f.species.isInvertebrate && slopeAlignment > 0 && !sidestepping {
             forwardTarget = max(forwardTarget, abs(desiredVY) * 0.5 * slopeAlignment)
         }
+        // A sidestep starts nearly across the bed and arcs forward as it goes.
+        if sidestepping { forwardTarget = min(forwardTarget, f.species.cruiseSpeed * (0.25 + 0.5 * min(1, f.burst.elapsed / 0.6))) }
         // A fish that spots food behind it brakes hard instead of coasting away.
         let braking = f.isChasingFood && alignment < 0 && !mostlyVertical ? 1 - exp(-movement * 12) : response
         f.forwardSpeed += (forwardTarget - f.forwardSpeed) * max(response, braking)
         var vy = f.vy + (desiredVY - f.vy) * response
-        if !f.isChasingFood && !f.species.isInvertebrate {
+        if !f.isChasingFood && !f.species.isInvertebrate && !sidestepping {
             // A fish climbs or dives along a gentle slope, never straight up like a lift.
             let climb = max(f.forwardSpeed * 0.6, f.species.cruiseSpeed * 0.15)
             vy = max(-climb, min(climb, vy))

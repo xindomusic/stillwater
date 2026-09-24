@@ -201,7 +201,8 @@ enum FishRendering {
                         // crabStride 0.2: the planted foot sweeps from +0.1 to -0.1 along the walking axis
                         // (Simulation.crabStride). A crab coming to a stop lowers each lifted foot where it
                         // is, so no foot slides across the sand.
-                        vec2 foot = restFoot + legAxis * sweep * 0.1 + vec2(0.0, lift * 0.045 * power);
+                        // A stride toward or away from the viewer is drawn foreshortened (Simulation.crabVerticalStride).
+                        vec2 foot = restFoot + legAxis * vec2(1.0, 0.5) * sweep * 0.1 + vec2(0.0, lift * 0.045 * power);
                         // Two-bone reach with the knee raised, as crab legs are held.
                         float upper = length(restKnee - root), lower = length(restFoot - restKnee);
                         vec2 reach = foot - root;

@@ -107,6 +107,8 @@ struct FishState: Identifiable {
     /// A loach's own clock for pecking at the sand and rippling at rest, and how far into a
     /// sifting pause it is (0 swimming, 1 head down working the sand).
     var siftClock = 0.0, siftEnvelope = 0.0
+    /// How long a loach has gone without a real dart, in movement units.
+    var parkedFor = 0.0
 
     init(id: Int, species: FishSpecies, x: Double, y: Double, depth: Double, facingRight: Bool, finPhase: Double, moodRemaining: Double) {
         self.id = id
@@ -342,11 +344,26 @@ struct BurstRhythm {
         restYaw = dice.normal(deviation: 0.35).clamped(to: -0.6...0.6)
     }
 
-    /// Something is in the way: veer round it, farther back or nearer on the bed.
-    mutating func swerve() {
-        guard moving, abs(bearing) < 0.85 else { return }
-        bearing = bearing < 0 ? -0.9 : 0.9
+    /// Something is in the way: let the dart run out here and sift instead.
+    mutating func stop() {
+        guard moving else { return }
+        moving = false
+        settle()
+        remaining = min(remaining, 1.2)
     }
+
+    /// Whether a dart began on this very update.
+    var justSetOff: Bool { moving && elapsed == 0 }
+
+    /// Turn the dart just begun into a sidestep up (+) or down (−) the bed to another lane.
+    mutating func sidestep(up: Bool) {
+        guard moving else { return }
+        remaining = dice.value(0.7...1.5)
+        bearing = (up ? 1 : -1) * .pi / 2
+    }
+
+    /// Whether the current dart is a sidestep across the bed rather than a run along it.
+    var sidestepping: Bool { moving && abs(bearing) > 1 }
 
     /// Keep going a little longer (for instance to finish a turn while still swimming).
     mutating func hold(_ time: Double) {
@@ -486,6 +503,12 @@ struct FishNavigation {
         turnLimit = dice.value(Self.turnLimits)
         viewAngle = dice.normal(deviation: 0.2).clamped(to: -0.32...0.32)
         shoalAffinity = sociability
+    }
+
+    /// Head back the way the fish came, because the way ahead is taken.
+    mutating func turnBack() {
+        heading = atan2(-sin(heading) * flatness, -cos(heading)) + dice.normal(deviation: 0.15)
+        meander = 0
     }
 
     mutating func advance(delta: Double, x: Double, y: Double, region: SwimRegion, resting: Bool) {

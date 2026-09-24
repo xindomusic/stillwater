@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0 — 2026-09-24
+
+- Loaches keep their lanes on the sand: a loach never darts into a neighbour or a crab. Setting off with someone close ahead it turns back if there is room, or crawls diagonally across to another lane; a neighbour moving into its lane ends the dart and it coasts to a stop short of them. Loaches no longer pass through one another, stack, or line up nose to tail, and one boxed in by neighbours works its way free instead of parking.
+- A loach and a crab keep a box of room between them, so a loach no longer lies with its snout across a crab's legs, and a darting loach gives crabs a wide berth.
+- Crabs walking toward or away from you now stop or sidestep for whoever lies across their path instead of walking over them, and their stride in that direction is drawn foreshortened, so the legs no longer look like stilts.
+- Loach darts are strongest at the start and ease off, with a top speed of about two body lengths a second; a loach that has just turned does not turn straight back again.
+
 ## 1.5.0 — 2026-09-24
 
 - Crab legs now match the body's movement: the step cycle advances with the distance the crab actually travels, so planted feet no longer slide, whether it walks sideways, forward, back, or is nudged by a neighbour. When a crab stops, each lifted foot comes down where it is, and the shell bobs with each step while the feet stay put.
