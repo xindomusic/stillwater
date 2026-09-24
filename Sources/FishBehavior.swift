@@ -264,9 +264,11 @@ struct ShrimpBehavior {
                 target = SIMD2(dice.value((region.left + inset)...(region.right - inset)), dice.value(bedTop...region.top))
             case .grazing, .drifting:
                 phase = .seekingCover
-                remaining = dice.value(35...55)
+                remaining = dice.value(6...15)
                 coverOnLeft = dice.chance(0.5)
-                target = SIMD2(coverOnLeft ? region.left + 0.012 : region.right - 0.012, bedTop - 0.006)
+                // Each shrimp picks its own nook along the refuge edge.
+                target = SIMD2(coverOnLeft ? region.left + 0.012 + dice.value(0...0.03) : region.right - 0.012 - dice.value(0...0.03),
+                               bedTop - 0.006 - dice.value(0...0.015))
                 (target.x, target.y) = region.constrain(x: target.x, y: target.y)
             case .seekingCover:
                 phase = .grazing

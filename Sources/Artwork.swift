@@ -166,13 +166,64 @@ enum Artwork {
         }
         path.closeSubpath()
         context.addPath(path); context.clip()
-        let colors = [CGColor(gray: 1, alpha: 1), CGColor(gray: 0.62, alpha: 1)] as CFArray
+        let colors = [CGColor(gray: 1, alpha: 1), CGColor(gray: 0.86, alpha: 1)] as CFArray
         let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
         context.drawLinearGradient(gradient, start: CGPoint(x: 8, y: 22), end: CGPoint(x: 16, y: 2), options: [])
         let texture = SKTexture(cgImage: context.makeImage()!)
         texture.filteringMode = .linear
         return texture
     }
+
+    /// Which of the crab's eight walking legs each photographed pixel belongs to (red channel:
+    /// leg index + 1, times 25; zero for the shell, claws, and water), so the shader can move each
+    /// leg as one rigid limb.
+    static let crabLegLabels: SKTexture = {
+        let side = 512
+        let photo = fishTexture(.crab).cgImage()
+        let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(photo, in: CGRect(x: 0, y: 0, width: side, height: side))
+        let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+        // Memory rows run top-down; uv y runs up.
+        func uv(_ index: Int) -> SIMD2<Double> {
+            SIMD2(Double(index % side) + 0.5, Double(side - 1 - index / side) + 0.5) / Double(side)
+        }
+        func walkable(_ index: Int) -> Bool {
+            let p = uv(index), shell = (p - SIMD2(0.5, 0.575)) / SIMD2(0.22, 0.145)
+            let claws = abs(p.x - 0.5) < 0.15 && p.y > 0.30 && p.y < 0.49
+            return pixels[index * 4 + 3] > 1 && (shell * shell).sum() > 1.0 && !claws
+        }
+        let legs: [[SIMD2<Double>]] = [[[0.36, 0.63], [0.26, 0.735], [0.17, 0.66]], [[0.33, 0.57], [0.15, 0.63], [0.06, 0.43]],
+                                       [[0.33, 0.53], [0.14, 0.50], [0.08, 0.28]], [[0.36, 0.49], [0.23, 0.43], [0.22, 0.20]]]
+        func distance(_ p: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double {
+            let edge = b - a, t = max(0, min(1, ((p - a) * edge).sum() / (edge * edge).sum()))
+            let d = p - a - edge * t
+            return (d * d).sum().squareRoot()
+        }
+        // Every opaque pixel outside the shell and claws belongs to its nearest leg skeleton.
+        var labels = [UInt8](repeating: 0, count: side * side)
+        for index in 0..<(side * side) where walkable(index) {
+            let p = uv(index)
+            var best = 0, bestDistance = 0.16
+            for (pair, leg) in legs.enumerated() {
+                for mirrored in [false, true] {
+                    let q = mirrored ? SIMD2(1 - p.x, p.y) : p
+                    let d = min(distance(q, leg[0], leg[1]), distance(q, leg[1], leg[2]))
+                    if d < bestDistance { bestDistance = d; best = pair * 2 + (mirrored ? 1 : 0) + 1 }
+                }
+            }
+            labels[index] = UInt8(best)
+        }
+        var rgba = [UInt8](repeating: 0, count: side * side * 4)
+        for i in 0..<(side * side) { rgba[i * 4] = labels[i] * 25; rgba[i * 4 + 3] = 255 }
+        let provider = CGDataProvider(data: Data(rgba) as CFData)!
+        let image = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let texture = SKTexture(cgImage: image)
+        texture.filteringMode = .nearest
+        return texture
+    }()
 
     /// A soft round glow that fades to transparent, for clouds of stirred-up silt.
     static let softDot: SKTexture = {
@@ -256,8 +307,9 @@ enum Artwork {
         let context = CGContext(data: nil, width: 128, height: 32, bitsPerComponent: 8, bytesPerRow: 512,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.translateBy(x: 64, y: 16); context.scaleBy(x: 64, y: 16)
-        let colors = [CGColor(gray: 0, alpha: 0.24), CGColor(gray: 0, alpha: 0)] as CFArray
-        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1])!
+        // A firm core where the body rests on the sand, softening outward.
+        let colors = [CGColor(gray: 0, alpha: 0.6), CGColor(gray: 0, alpha: 0.32), CGColor(gray: 0, alpha: 0)] as CFArray
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.45, 1])!
         context.drawRadialGradient(gradient, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: 1, options: [])
         return SKTexture(cgImage: context.makeImage()!)
     }()

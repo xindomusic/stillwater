@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0 — 2026-09-23
+
+- Crab legs are now jointed limbs instead of a warped photograph: each of the eight legs has a raised knee and a foot that stays planted on the sand while the body moves, then lifts and steps forward, in the alternating diagonal gait of real crabs. The shell, eyes, and claws remain photographic, the legs are textured from the photographed legs, and a resting crab picks at the sand with its claws.
+- Crabs keep a compact, low stance and stay clear of loaches, shrimp, and each other; the body bobs slightly with each step.
+- Shrimp walking legs step in a wave from back to front, swimmerets beat while swimming, and legs tuck in off the sand. Grazing shrimp stay on the bed, and fleeing shrimp choose their own hiding spots.
+- Loaches ripple along their whole length, tip only the head down into the sand when sifting, and rest on soft contact shadows that shorten when the fish faces you.
+- Stirred sand shows as fine sand-coloured grains thrown up and settling back, with a soft silt cloud behind the animal that raised it.
+- Wider sand beds in Sunken Grove and Willow Springs give bottom dwellers room.
+- Fixed a torn loach head while sifting, leftover leg fragments on shrimp and crabs, and a fin-motion rendering check that depended on the display's pixel density.
+
 ## 1.3.0 — 2026-09-23
 
 - Realistic bubbles: a dense air-stone stream of about 3 mm bubbles, a fainter one farther back, and tiny plant bubbles. Speeds follow measured rise rates; larger bubbles flatten, rock, and zigzag; each shows a clear inverted centre and a silvery rim, and distant ones soften.

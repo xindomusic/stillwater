@@ -184,9 +184,19 @@ enum FishSpecies: String, CaseIterable, Codable, Identifiable {
         case .pearl: return 0.85
         case .betta: return 0.9
         case .loach: return 1.15
+        // Shrimp pivot on their legs rather than swimming round.
+        case .shrimp: return 2.5
         default: return 1
         }
     }
+
+    /// How much sand a resident covers side to side, in scene widths: a crab's legs spread far
+    /// wider than its shell.
+    var bedFootprint: Double { self == .crab ? bodySize * 1.05 / 2145 : bodyLength }
+
+    /// How much faster than cruise a fish may swim to carry itself through a turn. Eel-like
+    /// loaches glide round quickly; others push only a little.
+    var turnSurge: Double { self == .loach ? 2.6 : 1.3 }
 
     /// Tightest routine turn, in body lengths. Long, deep-bodied fish swing wide arcs.
     var turnRadius: Double {

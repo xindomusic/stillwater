@@ -335,7 +335,7 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                     if let start = turnStartSpeed[f.id] {
                         // Its own cruising pace, or a modest push through the turn, whichever is faster.
                         let ownPace = f.species.cruiseSpeed * f.navigation.speedFactor * f.personality.boldness * max(1, f.activity)
-                        let allowed = max(start, ownPace, f.species.cruiseSpeed * AquariumSimulation.turnSurge) * 1.05
+                        let allowed = max(start, ownPace, f.species.cruiseSpeed * f.species.turnSurge) * 1.05
                         t.check(f.forwardSpeed <= allowed, "\(f.species) does not sprint to make a turn (\(f.forwardSpeed) vs \(allowed))")
                     }
                 }

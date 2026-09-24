@@ -4,6 +4,7 @@ import SpriteKit
 /// Attribute values are reused every frame instead of allocating new ones per node.
 private final class FishSprite: SKSpriteNode {
     let depthValue = SKAttributeValue(float: 1)
+    let pixelValue = SKAttributeValue(float: 0)
     let poseValue = SKAttributeValue(float: 0)
     let phaseValue = SKAttributeValue(float: 0)
     let strokeValue = SKAttributeValue(vectorFloat4: .zero)
@@ -207,6 +208,12 @@ final class AquariumScene: SKScene {
             node.size = CGSize(width: body * Self.fishCanvas, height: body * Self.fishCanvas)
             node.zPosition = CGFloat(ParticlePerspective.layer(f.depth))
             node.depthValue.floatValue = Float(f.depth); node.setValue(node.depthValue, forAttribute: "a_depth")
+            if f.species == .crab {
+                let spritePoints: Double = max(1, body * Self.fishCanvas)
+                let texelsPerPoint: Double = Self.fishCanvas * Double(Artwork.fishSampleScale(.crab).x) / spritePoints
+                node.pixelValue.floatValue = Float(texelsPerPoint)
+                node.setValue(node.pixelValue, forAttribute: "a_pixel")
+            }
             // A fish turns about a point in the front third of its body, so the tail swings wider
             // than the head; the simulated position is that pivot.
             let pivot = framing?.point(x: f.x, y: f.y) ?? CGPoint(x: f.x * size.width, y: f.y * size.height)
@@ -217,7 +224,11 @@ final class AquariumScene: SKScene {
             let pose = wrappedYaw / (.pi / 4)
             node.poseValue.floatValue = Float(pose); node.setValue(node.poseValue, forAttribute: "a_pose")
             node.phaseValue.floatValue = Float(f.finPhase); node.setValue(node.phaseValue, forAttribute: "a_finPhase")
-            node.strokeValue.vectorFloat4Value = SIMD4(Float(f.stroke.amplitude), Float(f.stroke.bend),
+            // A shrimp's legs step while it walks and tuck while it swims or rests.
+            // Off the sand (drifting, escaping, sinking back) the legs stay tucked.
+            let onSand = f.y <= AquariumSimulation.region(for: .shrimp, theme: configuration.theme).bottom + 0.035
+            let shrimpLegs: Float = f.shrimpBehavior.isEscaping || !onSand ? 0 : (f.shrimpBehavior.stepping || f.feeding != nil ? 0.45 : 0.06)
+            node.strokeValue.vectorFloat4Value = SIMD4(f.species == .shrimp ? shrimpLegs : Float(f.stroke.amplitude), Float(f.stroke.bend),
                 f.species == .shrimp ? Float(f.shrimpBehavior.concealment) : 0,
                 f.species == .shrimp && f.shrimpBehavior.coverOnLeft ? 1 : 0)
             node.setValue(node.strokeValue, forAttribute: "a_stroke")
@@ -238,11 +249,21 @@ final class AquariumScene: SKScene {
             } else { bite = 0 }
             // A shrimp sinking back after a flip tips nose-down.
             let sinking = f.species == .shrimp && !f.shrimpBehavior.isEscaping && f.vy < -TankScale.height(cm: 0.5) ? -0.25 : 0.0
+            // A sifting loach tips its snout down into the sand.
+            let sifting = f.species == .loach && f.feeding == nil && f.mood == .forage && f.forwardSpeed < f.species.cruiseSpeed * 0.3
+            if sifting { node.strokeValue.vectorFloat4Value.z = Float(0.7 + 0.3 * sin(f.finPhase * 0.7)); node.setValue(node.strokeValue, forAttribute: "a_stroke") }
             node.zRotation = CGFloat((f.pitch + bite + sinking) * cos(f.yaw))
+            if f.species == .crab && f.crabGait.walking {
+                // The body bobs a little with each step.
+                node.position.y += CGFloat(abs(sin(f.finPhase)) * body * 0.012)
+            }
             // Distance changes color, never the opacity of a fish's body.
             if let shadow = fishShadows[f.id] {
-                shadow.size = CGSize(width: body * 0.72, height: body * 0.08)
-                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species.isInvertebrate ? 0.25 : 0.085))
+                // Soft shadows where bodies and feet meet the sand.
+                // A fish's shadow is as long as the body looks: short when it faces the viewer.
+                let lengthShown = f.species == .crab ? 1.0 : 0.3 + 0.7 * abs(cos(f.yaw))
+                shadow.size = CGSize(width: body * (f.species == .loach ? 0.9 : 0.85) * lengthShown, height: body * (f.species == .loach ? 0.16 : (f.species == .crab ? 0.2 : 0.14)))
+                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species == .crab ? 0.17 : (f.species == .shrimp ? 0.24 : 0.08)))
                 shadow.alpha = f.species == .shrimp ? 1 - f.shrimpBehavior.concealment : 1
                 if f.species == .shrimp {
                     let bedTop = AquariumSimulation.region(for: .loach, theme: configuration.theme).top
@@ -362,17 +383,20 @@ final class AquariumScene: SKScene {
             guard grains.indices.contains(i) else { node.isHidden = true; continue }
             let grain = grains[i]
             node.isHidden = false
-            node.texture = grain.isCloud ? Artwork.softDot : Artwork.sandGrains[i % Artwork.sandGrains.count]
-            let localSand = Artwork.sandColor(configuration.theme, x: (grain.x * 20).rounded() / 20, y: 0.07)
-            node.color = grain.isCloud ? shade(localSand, 1.02) : shade(localSand, [0.8, 0.86, 0.74][(i / 4) % 3])
+            node.texture = grain.isCloud ? Artwork.softDot : Artwork.mote
+            // Grains are the bed's own sand, only a shade darker where shadowed; the silt is a pale haze.
+            // Sampled from the typical sand of the whole bed (never a pebble), a shade darker than the lit surface.
+            let bedSand = Artwork.sandColor(configuration.theme, x: 0.5, y: 0.07)
+            node.color = grain.isCloud ? shade(bedSand, 0.92) : shade(bedSand, [0.9, 0.95, 0.85][(i / 4) % 3])
             node.zRotation = grain.isCloud ? 0 : CGFloat(i) * 1.37
             node.position = framing?.point(x: grain.x, y: grain.y) ?? .zero
             node.position.y += CGFloat(Self.bedLift(grain.depth) * imageHeight)
-            let diameter = max(1.2, TankScale.points(mm: grain.size, imageHeight: imageHeight) * ParticlePerspective.scale(grain.depth))
-            let spread = grain.isCloud ? 1 + grain.age * 0.6 : 1
+            let diameter = max(grain.isCloud ? 1.2 : 1.8, TankScale.points(mm: grain.size, imageHeight: imageHeight) * ParticlePerspective.scale(grain.depth))
+            let spread = grain.isCloud ? 1.2 + grain.age * 0.5 : 1
             node.size = CGSize(width: diameter * spread * (grain.isCloud ? 1.6 : 1), height: diameter * spread)
             node.alpha = CGFloat(SandField.opacity(of: grain))
-            node.zPosition = ParticlePerspective.layer(grain.depth) + 0.001
+            // Silt hangs just behind the resident that stirred it; grains fly in front.
+            node.zPosition = ParticlePerspective.layer(grain.depth) + (grain.isCloud ? -0.03 : 0.001)
         }
     }
 
