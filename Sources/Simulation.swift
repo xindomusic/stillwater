@@ -60,6 +60,8 @@ struct AquariumSimulation {
     static let feedingGlide = 0.0
     /// How strongly forward travel during a turn carries a fish nearer or farther.
     static let depthTravel = 6.0
+    /// The same travel on the sand bed, where going farther back means moving up the picture.
+    static let bedTravel = 1.0
     static let turnGain = 3.5
     /// How quickly turning speed follows its target (per movement unit).
     static let turnResponse = 16.0
@@ -75,7 +77,11 @@ struct AquariumSimulation {
     /// Shrimp flee from a fish that hunts them when it comes this close.
     static let threatDistance = 0.06
     /// Leg-cycle radians per movement unit when a crab walks at cruise speed.
-    static let crabStepsPerCruise = 2.2
+    /// How far each foot sweeps back while planted, in photo texture units; must match the
+    /// `crabStride` constant in the crab shader so feet stay fixed to the sand.
+    static let crabStride = 0.2
+    /// Share of each step cycle a foot spends planted (stance), also shared with the shader.
+    static let crabStance = 0.6
     /// Leg-cycle radians per movement unit for a walking shrimp.
     static let shrimpStepRate = 18.0
     /// Bed residents closer than this in depth keep apart; farther apart they simply pass in front.
@@ -139,9 +145,10 @@ struct AquariumSimulation {
         if species.isBottomDweller {
             var bed: SwimRegion
             switch theme {
-            case .grove: bed = SwimRegion(left: 0.47, right: 0.90, bottom: 0.06, top: 0.115)
-            case .river: bed = SwimRegion(left: 0.14, right: 0.63, bottom: 0.06, top: 0.13)
-            case .spring: bed = SwimRegion(left: 0.21, right: 0.60, bottom: 0.06, top: 0.12)
+            // The open sand, from near the glass (bottom of the picture) back toward the rocks.
+            case .grove: bed = SwimRegion(left: 0.47, right: 0.90, bottom: 0.045, top: 0.14)
+            case .river: bed = SwimRegion(left: 0.14, right: 0.63, bottom: 0.045, top: 0.16)
+            case .spring: bed = SwimRegion(left: 0.30, right: 0.64, bottom: 0.045, top: 0.115)
             }
             if species == .shrimp { bed.top += 0.08 }
             return bed
@@ -201,17 +208,19 @@ struct AquariumSimulation {
         for i in fish.indices {
             let r = swimmingRegion(for: fish[i], theme: configuration.theme)
             (fish[i].x, fish[i].y) = r.constrain(x: fish[i].x, y: fish[i].y)
+            if fish[i].species.isBottomDweller {
+                let bedTop = Self.region(for: .loach, theme: configuration.theme).top
+                fish[i].depth = Self.bedDepth(y: min(fish[i].y, bedTop), theme: configuration.theme)
+            }
         }
     }
 
-    /// Crabs keep to the nearer part of the bed and loaches to the farther part, so the two
-    /// pass in front of each other rather than piling up on one line.
-    static func birthDepths(for species: FishSpecies) -> ClosedRange<Double> {
-        switch species {
-        case .crab: return 0.98...FishState.depthRange.upperBound
-        case .loach: return FishState.depthRange.lowerBound...0.86
-        default: return FishState.depthRange
-        }
+    /// On the sand floor, depth follows height in the picture: a resident lower on the bed is
+    /// nearer the glass and drawn larger, one higher up is farther back and smaller.
+    static func bedDepth(y: Double, theme: AquariumTheme) -> Double {
+        let bed = region(for: .loach, theme: theme)
+        let t = ((y - bed.bottom) / max(0.001, bed.height)).clamped(to: 0...1)
+        return FishState.depthRange.upperBound - t * (FishState.depthRange.upperBound - FishState.depthRange.lowerBound)
     }
 
     /// Every individual owns independent random streams derived from its identity.
@@ -221,7 +230,7 @@ struct AquariumSimulation {
         let facingRight = birth.chance(0.5)
         var resident = FishState(id: nextID, species: species,
             x: birth.value(region.left...region.right), y: birth.value(region.bottom...region.top),
-            depth: birth.value(Self.birthDepths(for: species)), facingRight: facingRight,
+            depth: birth.value(FishState.depthRange), facingRight: facingRight,
             finPhase: birth.value(0...6), moodRemaining: birth.value(1...10))
         resident.personality = Personality(dice: &birth)
         resident.stroke = FishStroke(seed: personalSeed ^ 0xF1A5)
@@ -230,6 +239,7 @@ struct AquariumSimulation {
         resident.dice = Dice(seed: personalSeed ^ 0xBEA710)
         resident.shrimpBehavior = ShrimpBehavior(seed: personalSeed ^ 0x5A11)
         resident.crabGait = CrabGait(seed: personalSeed ^ 0xC2AB)
+        resident.burst = BurstRhythm(seed: personalSeed ^ 0xB0257)
         nextID += 1
         return resident
     }
@@ -368,21 +378,67 @@ struct AquariumSimulation {
         var goal = steeringGoal(&f, dt: dt, home: home, theme: theme)
         let previousBouts = f.crabGait.bouts, wasStepping = f.shrimpBehavior.stepping
         if f.species == .shrimp { steerShrimp(&f, goal: &goal, movement: movement, home: home) }
+        if f.species == .loach {
+            f.burst.advance(delta: movement)
+            // A loach that needs to turn around sets off and swims round rather than spinning in
+            // place, and keeps swimming until the turn is done; one that runs into a neighbour veers round it.
+            let turnLeft = abs(Self.angleDifference(f.facingRight ? 0 : .pi, f.yaw))
+            if f.feeding == nil {
+                if !f.burst.moving && turnLeft > 1 { f.burst.startBurst() }
+                if turnLeft > 0.5 { f.burst.hold(0.15) } else if isBlockedOnBed(f, heading: cos(f.yaw), lookahead: f.species.bodyLength * f.depth * 0.8) { f.burst.swerve() }
+            }
+            f.siftClock += movement
+            let sifting = f.feeding == nil && !f.burst.moving && f.mood != .hover
+            // The head goes down gently once a pause begins, and comes up at once to swim off.
+            f.siftEnvelope += ((sifting ? 1 : 0) - f.siftEnvelope) * (1 - exp(-dt * (sifting ? 4 : 25)))
+        }
         if f.species == .crab {
             f.crabGait.advance(delta: movement, x: f.x, y: f.y, region: home)
-            if f.crabGait.walking && isBlockedOnBed(f) { f.crabGait.bumped() }
+            // (A sidestep up or down the bed is not blocked by what lies to either side.)
+            if f.crabGait.walking && abs(cos(f.crabGait.direction)) > 0.5 && isBlockedOnBed(f, heading: cos(f.crabGait.direction)) { f.crabGait.bumped() }
             // Away from food, the gait alone decides where a crab walks.
             if f.feeding == nil { goal.x = f.x; goal.y = f.y }
         }
         let desiredActivity = activityTarget(for: f)
-        // Shrimp legs start and stop within a step; fish ease between moods.
-        let activityRate = f.species == .shrimp && f.feeding == nil ? 12.0 : 3.5
+        // Shrimp legs and loach wriggles start and stop quickly; other fish ease between moods.
+        let activityRate = f.feeding != nil ? 3.5 : (f.species == .shrimp ? 12.0 : (f.species == .loach ? 10.0 : 3.5))
         f.activity += (desiredActivity - f.activity) * (1 - exp(-movement * activityRate))
         let (dx, dy) = steeringVector(for: f, towards: goal)
+        let startX = f.x, startY = f.y
         swim(&f, dx: dx, dy: dy, goal: goal, movement: movement)
+        if f.species.isBottomDweller { f.depth = Self.bedDepth(y: min(f.y, home.top), theme: theme) }
         if f.species.isBottomDweller { nudgeApartOnBed(&f, region: goal.region, movement: movement) }
+        if f.species == .crab { stepCrabLegs(&f, dx: f.x - startX, dy: f.y - startY, dt: dt, movement: movement) }
         eatIfReached(&f, targetFood: goal.targetFood)
         stirSand(f, previousBouts: previousBouts, wasStepping: wasStepping, movement: movement)
+    }
+
+    /// The leg cycle advances exactly with the distance the crab actually moved, nudges and edges
+    /// included: during stance a foot sweeps back along the leg axis by the same amount the body
+    /// moves forward, so planted feet never slide. The gait clock runs backward as travel
+    /// reverses; flipping a sign in the shader would snap all eight feet.
+    private func stepCrabLegs(_ f: inout FishState, dx: Double, dy: Double, dt: Double, movement: Double) {
+        let photoUnit = f.species.sceneWidthPerPhotoUnit * f.depth
+        // Travel in photo units; a scene height is 1/aspect of a scene width on screen.
+        let tx = dx / photoUnit, ty = dy / TankScale.aspect / photoUnit
+        let travel = hypot(tx, ty)
+        if travel > 1e-9 {
+            // The axis turns toward the travel line, keeping its sense so reversals run the gait backward.
+            var ax = tx / travel, ay = ty / travel
+            if ax * f.legAxisX + ay * f.legAxisY < 0 { ax = -ax; ay = -ay }
+            let turn = 1 - exp(-movement * 8)
+            let nx = f.legAxisX + (ax - f.legAxisX) * turn, ny = f.legAxisY + (ay - f.legAxisY) * turn
+            let length = max(1e-6, hypot(nx, ny))
+            f.legAxisX = nx / length; f.legAxisY = ny / length
+        }
+        let along = tx * f.legAxisX + ty * f.legAxisY
+        // Capped below half a cycle per update, so even at the fastest settings the legs never strobe.
+        let step = along / (Self.crabStride / Self.crabStance) * 2 * .pi
+        f.finPhase += step.clamped(to: -0.9 * .pi...0.9 * .pi)
+        // Standing still, lifted feet come down within about a tenth of a second of real time.
+        let speed = travel / max(movement, 1e-6) * photoUnit
+        let standing = speed < f.species.cruiseSpeed * 0.2
+        f.legSettle += ((standing ? 1 : 0) - f.legSettle) * (1 - exp(-dt * (standing ? 15 : 30)))
     }
 
     /// Residents that work the bed kick up a little sand as they go.
@@ -521,19 +577,19 @@ struct AquariumSimulation {
         }
     }
 
-    /// The sand floor recedes away from the glass, so a resident farther back on the bed is drawn
-    /// a little higher on screen (a share of the artwork's height).
-    static func bedLift(_ depth: Double) -> Double { (1.0 - depth) * 0.07 }
-
-    /// Vertical separation of two bed residents as they appear on screen, including the lift.
-    static func bedGap(_ y: Double, _ depth: Double, _ otherY: Double, _ otherDepth: Double) -> Double {
-        (y + bedLift(depth)) - (otherY + bedLift(otherDepth))
-    }
+    /// Vertical separation of two bed residents on screen.
+    static func bedGap(_ y: Double, _ depth: Double, _ otherY: Double, _ otherDepth: Double) -> Double { y - otherY }
 
     /// A crab and another bed resident: crabs never settle over a loach or shrimp, at any depth,
     /// because their splayed legs would seem to stand on it.
     static func crabAndLoach(_ a: FishSpecies, _ b: FishSpecies) -> Bool {
         a == .crab || b == .crab
+    }
+
+    /// Pairs that must never overlap on screen, whatever their depth: crabs with anyone, and
+    /// loaches with each other, which would otherwise line up nose to tail and read as one fish.
+    static func keepApartAtAnyDepth(_ a: FishSpecies, _ b: FishSpecies) -> Bool {
+        crabAndLoach(a, b) || (a == .loach && b == .loach)
     }
 
     /// How far apart two bed residents must be up and down the screen: a crab's legs reach well
@@ -542,14 +598,24 @@ struct AquariumSimulation {
         crabAndLoach(a, b) ? 0.035 : 0.02
     }
 
-    /// A walking crab has another bed resident right ahead of it at the same depth.
-    private func isBlockedOnBed(_ f: FishState) -> Bool {
-        let heading = cos(f.crabGait.direction)
+    /// A crab heading for food with another crab already between it and the food, close by.
+    private func isQueuedBehind(_ f: FishState, food: FeedingResponse) -> Bool {
+        let mine = hypot(food.x - f.x, food.y - f.y)
         return neighbors.contains { other in
+            other.id != f.id && other.species == .crab
+                && hypot(food.x - other.x, food.y - other.y) < mine
+                && hypot(other.x - f.x, (other.y - f.y) * 0.5) < f.species.bedFootprint * f.depth * 1.1
+        }
+    }
+
+        /// Whether a neighbour on the bed lies just ahead, within `lookahead` beyond touching. A loach
+    /// gives a crab a wider berth, so it never slips under the crab's legs.
+    private func isBlockedOnBed(_ f: FishState, heading: Double, lookahead: Double = 0) -> Bool {
+        neighbors.contains { other in
             guard other.id != f.id, other.species.isBottomDweller,
                   abs(other.depth - f.depth) < Self.bedLayer || Self.crabAndLoach(f.species, other.species),
-                  abs(Self.bedGap(f.y, f.depth, other.y, other.depth)) < 0.015 else { return false }
-            let reach = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5
+                  abs(Self.bedGap(f.y, f.depth, other.y, other.depth)) < (f.species == .loach && other.species == .crab ? 0.035 : 0.015) else { return false }
+            let reach = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 + lookahead
             let ahead = (other.x - f.x) * heading
             return ahead > 0 && ahead < reach
         }
@@ -557,11 +623,26 @@ struct AquariumSimulation {
 
     /// Residents lying on the bed that touch at the same depth slide gently apart along the sand,
     /// whichever way they face, as bodies bump and settle side by side.
+    /// How far apart side to side, as a share of their footprints, bottom dwellers keep. Loaches
+    /// keep a little more room, so two never read as one long fish lying nose to tail, but crowd
+    /// in at food.
+    static func bedReachX(_ a: FishSpecies, _ b: FishSpecies, feeding: Bool = false) -> Double {
+        a == .loach && b == .loach && !feeding ? 1.2 : 0.9
+    }
+
+    /// A crab away from food holds its ground; a loach that meets it goes round it, and is not
+    /// the one to shove the crab along.
+    private func holdsGround(_ f: FishState, against other: Neighbor) -> Bool {
+        f.species == .crab && f.feeding == nil && other.species == .loach
+    }
+
     private func nudgeApartOnBed(_ f: inout FishState, region: SwimRegion, movement: Double) {
+        // A shrimp tucked into its refuge is not shouldered out of it; neighbours make the room.
+        if f.species == .shrimp && f.feeding == nil && f.shrimpBehavior.holdsPosition { return }
         var push = 0.0
-        for other in neighbors where other.id != f.id && other.species.isBottomDweller
-            && (abs(other.depth - f.depth) < Self.bedLayer || Self.crabAndLoach(f.species, other.species)) {
-            let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * 0.9
+        for other in neighbors where other.id != f.id && other.species.isBottomDweller && !holdsGround(f, against: other)
+            && (abs(other.depth - f.depth) < Self.bedLayer || Self.keepApartAtAnyDepth(f.species, other.species)) {
+            let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * Self.bedReachX(f.species, other.species, feeding: f.isChasingFood)
             let sx = f.x - other.x, sy = Self.bedGap(f.y, f.depth, other.y, other.depth)
             let gap = hypot(sx / reachX, sy / Self.bedReachY(f.species, other.species))
             guard gap < 1 else { continue }
@@ -569,7 +650,13 @@ struct AquariumSimulation {
             push += side * (1 - gap)
         }
         guard push != 0 else { return }
-        f.x += push.clamped(to: -1...1) * f.species.cruiseSpeed * Self.bedNudge * movement
+        if f.species == .crab, let food = f.feeding, food.phase == .approaching, push * (food.x - f.x) < 0 {
+            // A crab crowded at food waits its turn rather than being shoved back from it.
+            return
+        }
+        // A resident heading for food only shoulders its neighbours aside gently.
+        let nudge = f.isChasingFood ? Self.bedNudge * 0.3 : Self.bedNudge
+        f.x += push.clamped(to: -1...1) * f.species.cruiseSpeed * nudge * movement
         (f.x, f.y) = region.constrain(x: f.x, y: f.y)
     }
 
@@ -586,6 +673,11 @@ struct AquariumSimulation {
         if f.species == .shrimp && f.feeding == nil { return f.shrimpBehavior.activity }
         if f.feeding?.phase == .nibbling { return 0.18 }
         if f.feeding?.phase == .leaving { return 0.7 }
+        if f.species == .loach && f.feeding == nil && f.mood != .hover {
+            // Wriggle forward in a burst, then stop dead to sift before the next one.
+            // A dart is strongest at the start and eases off, rather than cruising at one speed.
+            return f.burst.moving ? 10 * (0.55 + 0.45 * exp(-f.burst.elapsed / 0.45)) : 0.02
+        }
         switch f.mood {
         case .hover: return 0.035
         case .dash: return 2.5
@@ -620,15 +712,16 @@ struct AquariumSimulation {
                 // side along the sand, instead of piling on top of one another.
                 // Animals at clearly different depths may pass in front of one another, except
                 // that a crab never settles right over a loach, where it would seem to stand on it.
-                guard abs(other.depth - f.depth) < Self.bedLayer || Self.crabAndLoach(f.species, other.species) else { continue }
-                let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * 0.9
+                guard abs(other.depth - f.depth) < Self.bedLayer || Self.keepApartAtAnyDepth(f.species, other.species),
+                      !holdsGround(f, against: other) else { continue }
+                let reachX = (f.species.bedFootprint * f.depth + other.species.bedFootprint * other.depth) * 0.5 * Self.bedReachX(f.species, other.species, feeding: f.isChasingFood)
                 let reachY = Self.bedReachY(f.species, other.species)
                 let bedY = Self.bedGap(f.y, f.depth, other.y, other.depth)
                 let gap = hypot(sx / reachX, bedY / reachY)
                 if gap < 1 {
                     // While feeding they crowd in, but never lie right on top of one another.
-                    let feedingPush = Self.crabAndLoach(f.species, other.species) ? 0.3
-                        : (f.species == .loach && other.species == .loach ? 0.12 : (gap < 0.6 ? 0.08 : 0.025))
+                    let feedingPush = Self.crabAndLoach(f.species, other.species) ? (f.species == other.species ? 0.12 : 0.2)
+                        : (f.species == .loach && other.species == .loach ? 0.06 : (gap < 0.6 ? 0.08 : 0.025))
                     let force = (1 - gap) * (f.feeding == nil ? 0.3 : feedingPush)
                     let side: Double = sx != 0 ? (sx > 0 ? 1 : -1) : (f.id < other.id ? -1 : 1)
                     dx += side * force
@@ -655,21 +748,37 @@ struct AquariumSimulation {
     private func swim(_ f: inout FishState, dx: Double, dy: Double, goal: SteeringGoal, movement: Double) {
         let distance = max(0.001, hypot(dx, dy))
         let pace = (f.feeding == nil ? f.navigation.speedFactor : 1) * f.personality.boldness
-        let speed = f.species.cruiseSpeed * f.activity * pace * min(1, distance / 0.025)
+        // A wriggling loach keeps its pace however close its next spot on the bed is.
+        let throttle = f.species == .loach && f.feeding == nil && f.burst.moving ? 1 : min(1, distance / 0.025)
+        let speed = f.species.cruiseSpeed * f.activity * pace * throttle
         var desiredVX = dx / distance * speed, desiredVY = dy / distance * speed
+        if f.species == .loach && f.feeding == nil && f.burst.moving {
+            // Each dart veers a little, so the path over the sand arcs rather than running on rails.
+            let c = cos(f.burst.bearing), s = sin(f.burst.bearing)
+            (desiredVX, desiredVY) = (desiredVX * c - desiredVY * s, desiredVX * s + desiredVY * c)
+        }
         let previousSpeed = hypot(f.vx, f.vy)
         let previousYaw = f.yaw, previousYawVelocity = f.yawVelocity
         var responseRate = goal.targetFood == nil ? 1.8 : 3.2
         if f.species == .crab && f.feeding == nil {
             let gait = f.crabGait.velocityFactor
-            desiredVX += gait.x * f.species.cruiseSpeed * f.personality.boldness
-            desiredVY += gait.y * f.species.cruiseSpeed * f.personality.boldness
+            // The body surges a little with each step rather than gliding at an even speed.
+            let surge = 1 + 0.15 * sin(f.finPhase * 2)
+            desiredVX += gait.x * f.species.cruiseSpeed * f.personality.boldness * surge
+            desiredVY += gait.y * f.species.cruiseSpeed * f.personality.boldness * surge
             // Crab legs start and stop a burst almost at once.
             responseRate = 25
         } else if f.species == .shrimp && f.feeding == nil {
             responseRate = 8
+        } else if f.species == .loach && f.feeding == nil {
+            // A loach stops dead to sift rather than coasting.
+            responseRate = 14
         }
         let response = 1 - exp(-movement * responseRate)
+        if f.species == .crab, let food = f.feeding, food.phase == .approaching, isQueuedBehind(f, food: food) {
+            // Another crab is nearer the same food and in the way: stand and wait rather than jostle.
+            desiredVX = 0; desiredVY = 0
+        }
         if f.species == .crab {
             crawl(&f, desiredVX: desiredVX, desiredVY: desiredVY, response: response, movement: movement)
         } else if f.species == .shrimp && f.shrimpBehavior.isEscaping {
@@ -679,20 +788,24 @@ struct AquariumSimulation {
         }
         (f.x, f.y) = goal.region.constrain(x: f.x, y: f.y)
         let actualSpeed = hypot(f.vx, f.vy)
-        f.stroke.advance(delta: movement, species: f.species, speed: actualSpeed / f.species.cruiseSpeed,
+        // A loach coasting out of a dart holds its body straight; the wriggle is only for driving.
+        let coasting = f.species == .loach && f.feeding == nil && !f.burst.moving
+        f.stroke.advance(delta: movement, species: f.species, speed: actualSpeed / f.species.cruiseSpeed * (coasting ? 0.3 : 1),
             acceleration: (actualSpeed - previousSpeed) / (movement * f.species.cruiseSpeed),
             turnRate: Self.angleDifference(f.yaw, previousYaw) / movement,
             turnAcceleration: (f.yawVelocity - previousYawVelocity) / movement,
-            hovering: f.isHovering)
+            hovering: f.isHovering, restingBend: f.species == .loach && f.feeding == nil && !f.burst.moving ? f.burst.restBend : 0)
         if f.species == .crab {
-            // Crab legs step in proportion to the distance walked, and the gait clock runs
-            // backward continuously as travel reverses; flipping a sign in the shader would
-            // snap all eight feet.
-            let stride = ((f.vx + f.vy * 0.45) / f.species.cruiseSpeed).clamped(to: -4.5...4.5)
-            f.finPhase += movement * Self.crabStepsPerCruise * stride
+            // Crab legs step in proportion to the distance walked (see `stepCrabLegs`).
         } else if f.species == .shrimp {
             // About one and a half steps a second while walking; a slow idle between steps.
             f.finPhase += movement * (f.shrimpBehavior.stepping || f.feeding != nil ? Self.shrimpStepRate : Self.shrimpStepRate * 0.15)
+        } else if f.species == .loach {
+            // Anguilliform swimming: the body wave travels back a little faster than the fish moves
+            // forward, about one and a half waves per body length, plus a slow ripple at rest.
+            // A burst adds a quick beat of its own: a kuhli loach wriggles at two to three waves a second.
+            let travelled = hypot(f.vx, f.vy) * movement / (f.species.bodyLength * f.depth)
+            f.finPhase += travelled * 2 * .pi * 1.5 + movement * 0.35 + movement * 2 * .pi * 2 * min(1, f.activity / 2)
         } else {
             f.finPhase += movement * f.stroke.tailRate
         }
@@ -741,7 +854,9 @@ struct AquariumSimulation {
     /// view, so the path curves into or out of the scene instead of spinning in place.
     private func glide(_ f: inout FishState, desiredVX: Double, desiredVY: Double, response: Double, movement: Double) {
         chooseFacing(&f, desiredVX: desiredVX, movement: movement)
-        let targetYaw = (f.facingRight ? 0 : Double.pi) + (f.isChasingFood ? 0 : f.navigation.viewAngle)
+        // A resting loach lies at a slight angle of its own rather than parallel to its neighbours.
+        let restingLoach = f.species == .loach && f.feeding == nil && !f.burst.moving
+        let targetYaw = (f.facingRight ? 0 : Double.pi) + (f.isChasingFood ? 0 : f.navigation.viewAngle) + (restingLoach ? f.burst.restYaw : 0)
         var turnLimit = (f.isChasingFood ? Self.feedingTurnLimit : f.navigation.turnLimit) * f.species.turnAgility
         // Gouramis and bettas can hover and rotate slowly on their fins with a nearly straight body.
         let hoverTurn = f.isHovering
@@ -753,6 +868,8 @@ struct AquariumSimulation {
             // a visible arc while small, quick ones flick round.
             let radius = f.species.turnRadius * f.species.bodyLength
             turnLimit = min(turnLimit, max(Self.stationaryTurnRate, f.forwardSpeed / radius))
+            // A bursting loach whips round in a tight C, as eels do.
+            if f.species == .loach && f.feeding == nil && f.burst.moving { turnLimit *= 1.8 }
         }
         if (f.species == .loach || f.species == .shrimp) && abs(cos(f.yaw)) < 0.3 {
             // A side-on photograph cannot show these from the front, so they swing through that
@@ -771,8 +888,14 @@ struct AquariumSimulation {
         let glide = max(f.isChasingFood ? Self.feedingGlide : Self.wanderingGlide, alignment)
         let turning = min(1, abs(f.yawVelocity) / FishNavigation.turnLimits.upperBound)
         var forwardTarget = abs(desiredVX) * glide * (1 - 0.3 * turning)
+        let bursting = f.species == .loach && f.feeding == nil && f.burst.moving
+        if bursting {
+            // A wriggling loach drives forward at the burst's full pace, and keeps swimming through a turn.
+            forwardTarget = max(forwardTarget, hypot(desiredVX, desiredVY) * max(0.5, alignment))
+        }
         let turningAround = abs(cos(f.yaw)) < 0.5 || abs(Self.angleDifference(targetYaw, f.yaw)) > 1
-        if !f.isChasingFood && turningAround && !f.species.isInvertebrate && !hoverTurn {
+        let sifting = f.species == .loach && f.feeding == nil && !f.burst.moving
+        if !f.isChasingFood && turningAround && !f.species.isInvertebrate && !hoverTurn && !sifting {
             // Even a slow fish swims through a turn rather than pivoting on the spot, pushing a
             // little harder (up to `turnSurge` times its cruise speed); beyond that, large fish
             // swing wider and slower instead of speeding up.
@@ -795,6 +918,11 @@ struct AquariumSimulation {
             let climb = max(f.forwardSpeed * 0.6, f.species.cruiseSpeed * 0.15)
             vy = max(-climb, min(climb, vy))
         }
+        if bursting {
+            // A dart runs along the bed; moving farther back or nearer is slower going.
+            let limit = f.species.cruiseSpeed
+            vy = max(-limit, min(limit, vy))
+        }
         f.vy = vy
         if f.species == .shrimp, !f.shrimpBehavior.isEscaping, let theme,
            f.y > Self.region(for: .shrimp, theme: theme).top
@@ -813,11 +941,15 @@ struct AquariumSimulation {
         f.x += f.vx * movement
         f.y += f.vy * movement
         // yaw π/2 faces away from the viewer, so forward travel then carries the fish farther away.
-        f.depth -= f.forwardSpeed * sin(f.yaw) * movement * Self.depthTravel
-        // Drift back to the usual depth only while side-on, so it never cancels a turn's travel.
-        f.depth += (f.homeDepth - f.depth) * (1 - exp(-movement * 0.4 * cos(f.yaw) * cos(f.yaw)))
-        // Bed residents keep to their own depth band; others roam the full depth of the tank.
-        f.depth = f.depth.clamped(to: f.species.isBottomDweller ? Self.birthDepths(for: f.species) : FishState.depthRange)
+        if f.species.isBottomDweller {
+            // On the sand, farther away is higher up the receding bed.
+            f.y += f.forwardSpeed * sin(f.yaw) * movement * Self.bedTravel
+        } else {
+            f.depth -= f.forwardSpeed * sin(f.yaw) * movement * Self.depthTravel
+            // Drift back to the usual depth only while side-on, so it never cancels a turn's travel.
+            f.depth += (f.homeDepth - f.depth) * (1 - exp(-movement * 0.4 * cos(f.yaw) * cos(f.yaw)))
+            f.depth = f.depth.clamped(to: FishState.depthRange)
+        }
 
         let pitchTarget = FishState.pitchTarget(species: f.species, vx: f.vx, vy: f.vy, yawRate: f.yawVelocity, chasing: f.isChasingFood)
         let pitchStep = (pitchTarget - f.pitch) * (1 - exp(-movement * 3.0))

@@ -47,10 +47,10 @@ enum FishRendering {
         // and every foot planted on the sand below the body.
         vec2 crabStancePoint(int leg, int joint) {
             int pair = leg / 2;
-            vec2 p = joint == 0 ? vec2(0.37,0.62) : (joint == 1 ? vec2(0.20,0.70) : vec2(0.15,0.44));
-            if (pair == 1) { p = joint == 0 ? vec2(0.34,0.57) : (joint == 1 ? vec2(0.13,0.63) : vec2(0.08,0.40)); }
-            if (pair == 2) { p = joint == 0 ? vec2(0.34,0.53) : (joint == 1 ? vec2(0.13,0.55) : vec2(0.09,0.36)); }
-            if (pair == 3) { p = joint == 0 ? vec2(0.37,0.49) : (joint == 1 ? vec2(0.21,0.48) : vec2(0.18,0.34)); }
+            vec2 p = joint == 0 ? vec2(0.37,0.62) : (joint == 1 ? vec2(0.24,0.63) : vec2(0.22,0.45));
+            if (pair == 1) { p = joint == 0 ? vec2(0.34,0.57) : (joint == 1 ? vec2(0.19,0.58) : vec2(0.17,0.41)); }
+            if (pair == 2) { p = joint == 0 ? vec2(0.34,0.53) : (joint == 1 ? vec2(0.20,0.52) : vec2(0.19,0.37)); }
+            if (pair == 3) { p = joint == 0 ? vec2(0.37,0.49) : (joint == 1 ? vec2(0.24,0.47) : vec2(0.27,0.33)); }
             if (leg - pair * 2 == 1) { p.x = 1.0 - p.x; }
             return p;
         }
@@ -106,8 +106,9 @@ enum FishRendering {
             float loach = step(2.5, species) * (1.0 - step(3.5, species));
             // A sifting loach tips only its head down into the sand, turning it about a point just
             // behind the gills; the body stays on the bed.
-            float dip = loach * stroke.z * 0.12 * smoothstep(0.55, 0.7, uv.x);
-            uv = rotateAbout(uv, vec2(0.55, 0.45), dip);
+            // The bend spreads over the front half, so the body curves down rather than kinking.
+            float dip = loach * stroke.z * 0.12 * smoothstep(0.48, 0.85, uv.x);
+            uv = rotateAbout(uv, vec2(0.62, 0.45), dip);
             if (uv.x > 0.83) { return uv; }
             float posterior = clamp((0.76 - uv.x) / 0.70, 0.0, 1.0);
             float envelope = pow(posterior, mix(2.2, 1.25, loach));
@@ -117,6 +118,8 @@ enum FishRendering {
             // ripples along its whole length as it works over the sand.
             uv.y -= envelope * wave * power * mix(0.006, 0.05, loach);
             uv.y -= loach * sin(phase * 0.5 - uv.x * 9.0) * (1.0 - smoothstep(0.72, 0.8, uv.x)) * 0.02;
+            // Paused to sift, the rear of a loach never lies rigid: a slow ripple on its own clock.
+            uv.y -= loach * min(1.0, stroke.z * 2.0) * sin(stroke.w - posterior * 4.0) * posterior * posterior * 0.022;
             // Lateral tail sweep foreshortens the caudal fin around its root.
             float caudal = 1.0 - smoothstep(0.22, 0.34, uv.x);
             float sweep = sin(phase - 3.3) * power * 0.72 + stroke.y * 0.28;
@@ -165,19 +168,27 @@ enum FishRendering {
                 vec2 uv = 0.5 + (canvas - 0.5) * a_sampleScale / a_rect0.zw * vec2(1.0 / max(0.7, cos(crabYaw)), 1.0);
                 // The small claws under the shell pick at the sand while the crab stands still.
                 float claws = (1.0 - smoothstep(0.08, 0.14, abs(uv.x - 0.5))) * smoothstep(0.30, 0.36, uv.y) * (1.0 - smoothstep(0.44, 0.49, uv.y));
-                float resting = 1.0 - min(1.0, a_stroke.x * 3.0);
+                // a_curve for crabs: the axis the feet sweep along, how settled the legs are, and the body bob.
+                float resting = a_curve.z;
                 vec2 bodyUV = uv;
+                // The shell rises and falls with each step; the planted feet stay where they are.
+                bodyUV.y -= a_curve.w;
                 bodyUV.y += claws * resting * max(0.0, sin(a_fins.x * 1.7 + step(0.5, uv.x) * 2.1)) * 0.02;
                 vec4 bodyAtlas = atlasUV(bodyUV, a_rect0);
                 vec4 crabColor = texture2D(u_texture, bodyAtlas.xy) * bodyAtlas.z;
+                // Deepen the small claws so they read in front of the face at desktop size.
+                crabColor.rgb *= 1.0 - claws * 0.42;
                 // Photographed legs are replaced by the jointed ones below.
                 if (texture2D(u_legs, clamp(bodyUV, 0.001, 0.999)).r > 0.02) { crabColor = vec4(0.0); }
                 if (crabColor.a < 0.98) {
-                    float power = min(1.0, a_stroke.x * 1.6);
+                    // Legs always keep their full stride; the step cycle itself follows the distance walked.
+                    float power = 1.0 - a_curve.z;
+                    vec2 legAxis = a_curve.xy;
                     float nearest = 1.0;
                     vec4 legColor = vec4(0.0);
                     for (int i = 0; i < 8; i++) {
-                        vec2 root = crabStancePoint(i, 0), restKnee = crabStancePoint(i, 1), restFoot = crabStancePoint(i, 2);
+                        vec2 root = crabStancePoint(i, 0) + vec2(0.0, a_curve.w), restKnee = crabStancePoint(i, 1) + vec2(0.0, a_curve.w);
+                        vec2 restFoot = crabStancePoint(i, 2);
                         float side = float(i - (i / 2) * 2);
                         float pair = float(i / 2);
                         float cycle = fract((a_finPhase + mod(pair + side, 2.0) * 3.14159265 + pair * 0.12) / 6.2831853);
@@ -187,7 +198,10 @@ enum FishRendering {
                             sweep = -1.0 + 2.0 * t * t * (3.0 - 2.0 * t);
                             lift = sin(t * 3.14159265);
                         }
-                        vec2 foot = restFoot + vec2(sweep * 0.045, lift * 0.035) * power;
+                        // crabStride 0.2: the planted foot sweeps from +0.1 to -0.1 along the walking axis
+                        // (Simulation.crabStride). A crab coming to a stop lowers each lifted foot where it
+                        // is, so no foot slides across the sand.
+                        vec2 foot = restFoot + legAxis * sweep * 0.1 + vec2(0.0, lift * 0.045 * power);
                         // Two-bone reach with the knee raised, as crab legs are held.
                         float upper = length(restKnee - root), lower = length(restFoot - restKnee);
                         vec2 reach = foot - root;
@@ -206,22 +220,19 @@ enum FishRendering {
                             float t = clamp(dot(uv - a, edge) / dot(edge, edge), 0.0, 1.0);
                             vec2 offset = uv - (a + edge * t);
                             // Stout, flattened walking legs: a broad upper segment and a lower one tapering to a claw tip.
-                            float radius = segment == 0 ? mix(0.034, 0.030, t) : mix(0.026, 0.004, t * t);
+                            float radius = segment == 0 ? mix(0.032, 0.027, t) : mix(0.022, 0.003, t * t);
                             float d = length(offset);
                             if (d < radius + a_pixel && d / radius < nearest) {
                                 nearest = d / radius;
-                                // Sample the photographed leg at the matching place along it.
                                 vec2 normal = normalize(vec2(-edge.y, edge.x));
                                 vec2 photoEdge = photoB - photoA;
-                                vec2 photoNormal = normalize(vec2(-photoEdge.y, photoEdge.x));
-                                vec2 photoPoint = photoA + photoEdge * t + photoNormal * dot(offset, normal);
-                                vec4 photoAtlas = atlasUV(photoPoint, a_rect0);
-                                vec4 sampled = texture2D(u_texture, photoAtlas.xy) * photoAtlas.z;
-                                vec3 shell = vec3(0.72, 0.60, 0.44);
-                                vec3 tint = sampled.a > 0.6 ? mix(shell, sampled.rgb / sampled.a, 0.75) : shell;
+                                // One shade matched to the shell, lightly tinted by the photographed leg's centre.
+                                vec3 shell = vec3(0.60, 0.47, 0.32);
+                                vec4 core = texture2D(u_texture, atlasUV(photoA + photoEdge * t, a_rect0).xy);
+                                vec3 tint = core.a > 0.6 ? mix(shell, core.rgb / core.a, 0.3) : shell;
                                 // Brown speckles like the shell's, fixed to the leg.
                                 float speckle = sin(t * 61.0 + float(i) * 7.3 + dot(offset, normal) * 220.0) * sin(t * 37.0 + float(i) * 3.1);
-                                tint *= 1.0 - smoothstep(0.85, 0.98, speckle) * 0.18;
+                                tint *= 1.0 - smoothstep(0.8, 0.98, speckle) * 0.3;
                                 // Rounded limb: lit along its upper edge, darker below and toward the tip.
                                 float across = dot(offset, normal) / radius;
                                 tint *= 0.7 + 0.32 * (1.0 - across * across) + 0.08 * across;

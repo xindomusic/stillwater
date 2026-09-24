@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.0 — 2026-09-24
+
+- Crab legs now match the body's movement: the step cycle advances with the distance the crab actually travels, so planted feet no longer slide, whether it walks sideways, forward, back, or is nudged by a neighbour. When a crab stops, each lifted foot comes down where it is, and the shell bobs with each step while the feet stay put.
+- Crabs walk in steadier bouts of a few steps, mostly carrying on the same way; when something is in the way they usually wait or sidestep rather than turning back. Their pace surges slightly with each step. A crab is not shoved along by loaches, crabs crowding food wait behind the one nearest it, and crabs leave the refuge edges to the shrimp.
+- Loaches move like loaches instead of gliding at a constant speed: quick wriggling darts of one to three body lengths, strongest at the start, each veering a little, then pauses to sift. The body wave follows the distance travelled and beats two to three times a second in a dart, then fades as the loach coasts to a stop.
+- A loach turns around by swimming round in a curve rather than spinning in place, and veers around neighbours and crabs ahead.
+- A resting loach lies with its own slight curve and angle, eases its head down and pecks at the sand in irregular spells, and its tail ripples slowly.
+- Loaches keep a little more room between each other, so two rarely read as one long fish.
+- Fixed hidden shrimp being pushed out of their refuge by crabs.
+- Bubbles are calm again: no air stones or streams, just the occasional single bubble drifting slowly up from the sand or a plant leaf, taking several seconds to reach the surface and swaying gently.
+- The sand floor has perspective: bottom dwellers lower on the bed are nearer the glass and larger, those farther back sit higher and smaller, and turning on the sand carries them up or down the bed instead of in place.
+
 ## 1.4.0 — 2026-09-23
 
 - Crab legs are now jointed limbs instead of a warped photograph: each of the eight legs has a raised knee and a foot that stays planted on the sand while the body moves, then lifts and steps forward, in the alternating diagonal gait of real crabs. The shell, eyes, and claws remain photographic, the legs are textured from the photographed legs, and a resting crab picks at the sand with its claws.

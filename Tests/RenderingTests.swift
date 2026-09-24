@@ -221,7 +221,7 @@ import UniformTypeIdentifiers
                 }
                 if species == .crab {
                     // Where the drawn legs plant their feet (FishRendering crabStancePoint).
-                    for foot in [SIMD2<Double>(0.15,0.44), SIMD2(0.08,0.40), SIMD2(0.09,0.36), SIMD2(0.18,0.34)] {
+                    for foot in [SIMD2<Double>(0.22,0.45), SIMD2(0.17,0.41), SIMD2(0.19,0.37), SIMD2(0.27,0.33)] {
                         for right in [false, true] {
                             let u = right ? 1 - foot.x : foot.x
                             let cx = Int(128 + (u - 0.5) * 240 / 1.08)

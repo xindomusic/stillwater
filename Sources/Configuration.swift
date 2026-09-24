@@ -192,7 +192,12 @@ enum FishSpecies: String, CaseIterable, Codable, Identifiable {
 
     /// How much sand a resident covers side to side, in scene widths: a crab's legs spread far
     /// wider than its shell.
-    var bedFootprint: Double { self == .crab ? bodySize * 1.05 / 2145 : bodyLength }
+    var bedFootprint: Double { self == .crab ? bodySize * 1.35 / 2145 : bodyLength }
+
+    /// Scene widths covered by one unit of the photograph's texture coordinates. Profile
+    /// photographs are sampled at 1.08 over a sprite as wide as the body, so this is about
+    /// bodySize / 2316 (see `Artwork.fishSampleScale` and `AquariumFraming`).
+    var sceneWidthPerPhotoUnit: Double { bodySize / 2316 }
 
     /// How much faster than cruise a fish may swim to carry itself through a turn. Eel-like
     /// loaches glide round quickly; others push only a little.

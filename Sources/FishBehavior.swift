@@ -97,6 +97,16 @@ struct FishState: Identifiable {
     var feedingCooldown = 0.0
     var shrimpBehavior = ShrimpBehavior(seed: 1)
     var crabGait = CrabGait(seed: 1)
+    /// Wriggle-and-pause rhythm of a loach working over the sand.
+    var burst = BurstRhythm(seed: 1)
+    /// The line a crab's feet sweep along (a unit vector in photo space, y up). It follows the
+    /// direction of travel, but only as an axis: walking back along it runs the gait in reverse.
+    var legAxisX = 1.0, legAxisY = 0.0
+    /// 0 while a crab walks; eases to 1 as it stands, bringing lifted feet down to rest.
+    var legSettle = 1.0
+    /// A loach's own clock for pecking at the sand and rippling at rest, and how far into a
+    /// sifting pause it is (0 swimming, 1 head down working the sand).
+    var siftClock = 0.0, siftEnvelope = 0.0
 
     init(id: Int, species: FishSpecies, x: Double, y: Double, depth: Double, facingRight: Bool, finPhase: Double, moodRemaining: Double) {
         self.id = id
@@ -249,7 +259,7 @@ struct ShrimpBehavior {
             return
         }
         remaining -= delta
-        if phase == .seekingCover && hypot(x - target.x, (y - target.y) * 0.65) < 0.014 {
+        if phase == .seekingCover && hypot(x - target.x, (y - target.y) * 0.65) < 0.02 {
             phase = .hidden
             remaining = dice.value(3...9)
         } else if remaining <= 0 {
@@ -291,6 +301,69 @@ struct ShrimpBehavior {
     }
 }
 
+/// Bottom fish like kuhli loaches move in short wriggling bursts, then pause to sift the sand
+/// before setting off again. Burst and pause lengths are random waits.
+struct BurstRhythm {
+    private var dice: Dice
+    private(set) var moving = true
+    private(set) var remaining: Double
+    /// Each dart veers a little off the straight line, so a loach's path arcs across the sand.
+    private(set) var bearing = 0.0
+    /// How a loach lies while it rests: a slight curve of its body and a slight angle to the viewer.
+    private(set) var restBend = 0.0, restYaw = 0.0
+    /// Time since the current dart began.
+    private(set) var elapsed = 0.0
+
+    init(seed: UInt64) {
+        dice = Dice(seed: seed)
+        remaining = dice.exponential(mean: 1.2)
+    }
+
+    mutating func advance(delta: Double) {
+        guard delta > 0 else { return }
+        remaining -= delta
+        elapsed += delta
+        guard remaining <= 0 else { return }
+        moving.toggle()
+        if moving { setOff() } else { settle() }
+    }
+
+    /// Quick darts of one to three body lengths.
+    private mutating func setOff() {
+        elapsed = 0
+        remaining = dice.exponential(mean: 0.4).clamped(to: 0.3...0.9)
+        bearing = dice.normal(deviation: 0.35).clamped(to: -0.8...0.8)
+    }
+
+    /// Then a pause to work the sand, lying a little curved and angled.
+    private mutating func settle() {
+        remaining = dice.exponential(mean: 0.8).clamped(to: 0.3...2.5)
+        restBend = dice.normal(deviation: 0.22).clamped(to: -0.4...0.4)
+        restYaw = dice.normal(deviation: 0.35).clamped(to: -0.6...0.6)
+    }
+
+    /// Something is in the way: veer round it, farther back or nearer on the bed.
+    mutating func swerve() {
+        guard moving, abs(bearing) < 0.85 else { return }
+        bearing = bearing < 0 ? -0.9 : 0.9
+    }
+
+    /// Keep going a little longer (for instance to finish a turn while still swimming).
+    mutating func hold(_ time: Double) {
+        guard moving else { return }
+        remaining = max(remaining, time)
+    }
+
+    /// Set off now (for instance to turn around, which a loach does swimming, not on the spot).
+    mutating func startBurst() {
+        guard !moving else { return }
+        moving = true
+        elapsed = 0
+        setOff()
+        remaining = max(remaining, 0.4)
+    }
+}
+
 /// Crabs walk sideways in short bursts, stopping often to pick at the sand. Most bursts
 /// continue the same way; some reverse, and now and then a crab shuffles forward or back.
 struct CrabGait {
@@ -309,12 +382,23 @@ struct CrabGait {
         direction = dice.chance(0.5) ? 0 : .pi
     }
 
-    /// Something is in the way: stop, and set off the other way on the next burst.
+    /// Something is in the way. Most often the crab stops and waits for it to move; sometimes
+    /// it sidesteps farther back or nearer on the sand, and only now and then turns back.
     mutating func bumped() {
         guard walking else { return }
-        walking = false
-        remaining = dice.exponential(mean: 0.5).clamped(to: 0.15...2)
-        direction = .pi - direction
+        let choice = dice.next()
+        if choice < 0.6 {
+            walking = false
+            remaining = dice.exponential(mean: 0.8).clamped(to: 0.3...3)
+        } else if choice < 0.85 {
+            direction = dice.sign() * .pi / 2 + dice.normal(deviation: 0.4).clamped(to: -0.6...0.6)
+            pace *= 0.5
+            remaining = dice.value(0.4...0.7)
+        } else {
+            walking = false
+            remaining = dice.exponential(mean: 0.5).clamped(to: 0.15...2)
+            direction = .pi - direction
+        }
     }
 
     var velocityFactor: (x: Double, y: Double) {
@@ -325,31 +409,33 @@ struct CrabGait {
         guard delta > 0 else { return }
         remaining -= delta
         // At the edge of the sand, turn back the other way.
-        let margin = min(0.03, region.width * 0.15)
+        // Crabs leave the refuge edges, where shrimp tuck themselves in, to the shrimp.
+        let margin = min(0.045, region.width * 0.15)
         if (x < region.left + margin && cos(direction) < 0) || (x > region.right - margin && cos(direction) > 0) {
             direction = .pi - direction
         }
-        if (y < region.bottom + 0.004 && sin(direction) < 0) || (y > region.top - 0.004 && sin(direction) > 0) {
+        // Turn back well before the glass, so the nearest crabs are not pressed along the front edge.
+        if (y < region.bottom + 0.015 && sin(direction) < 0) || (y > region.top - 0.004 && sin(direction) > 0) {
             direction = -direction
         }
         guard remaining <= 0 else { return }
         if walking {
             walking = false
-            remaining = dice.exponential(mean: 0.9).clamped(to: 0.2...6)
+            remaining = dice.exponential(mean: 1.4).clamped(to: 0.4...6)
             return
         }
         walking = true
         bouts += 1
-        // Quick scuttles of about half a body length, rather than a slow stroll.
-        remaining = dice.exponential(mean: 0.6).clamped(to: 0.15...2)
-        pace = dice.logNormal(median: 3, spread: 0.25).clamped(to: 1.5...4.5)
-        if dice.chance(0.15) {
+        // Scuttles of a few steps, rather than a slow stroll or a single twitch.
+        remaining = dice.exponential(mean: 1.0).clamped(to: 0.4...2.5)
+        pace = dice.logNormal(median: 1.8, spread: 0.2).clamped(to: 1.2...2.6)
+        if dice.chance(0.04) {
             // Walking forward or back is awkward for a crab: rarer and slower.
             direction = dice.sign() * .pi / 2 + dice.normal(deviation: 0.25)
             pace *= 0.5
         } else {
             let side = cos(direction) >= 0 ? 0.0 : Double.pi
-            direction = (dice.chance(0.65) ? side : .pi - side) + dice.normal(deviation: 0.18)
+            direction = (dice.chance(0.85) ? side : .pi - side) + dice.normal(deviation: 0.1)
         }
     }
 }
@@ -493,8 +579,9 @@ struct FishStroke {
     }
 
     /// `hovering`: the fish is rotating in place on its pectoral fins, with a nearly straight body.
+    /// `restingBend`: a curve the body holds at rest, as a loach lying on the sand does.
     mutating func advance(delta: Double, species: FishSpecies, speed: Double, acceleration: Double, turnRate: Double,
-                          turnAcceleration: Double = 0, hovering: Bool = false) {
+                          turnAcceleration: Double = 0, hovering: Bool = false, restingBend: Double = 0) {
         guard delta > 0 else { return }
         remaining -= delta
         if remaining <= 0 {
@@ -514,8 +601,11 @@ struct FishStroke {
         let speciesRate: Double = species == .pearl ? 0.70 : (species == .loach ? 0.82 : 1)
         let rate = (2.1 + min(2.5, speed) * 6.3) * speciesRate * cadence * (0.48 + drive * 0.52)
         tailRate += (rate - tailRate) * ease
-        let power = min(1.25, (0.06 + min(2.5, speed) * 0.44 + effort * 0.23) * drive)
-        amplitude += (power - amplitude) * ease
+        // A loach's wriggle grows with its speed: a gentle ripple at a crawl, full only in a dart.
+        let power = species == .loach ? min(1.2, (0.02 + speed * 0.4) * (0.3 + 0.7 * drive))
+            : min(1.25, (0.06 + min(2.5, speed) * 0.44 + effort * 0.23) * drive)
+        // A loach's wriggle starts and dies with each burst, so its body straightens as it stops.
+        amplitude += (power - amplitude) * (species == .loach ? 1 - exp(-delta * 15) : ease)
         // Hovering uses gentle balancing fins even while the tail nearly rests.
         let balance = min(1.15, (0.48 + 0.30 / (1 + speed) + abs(turnRate) * 0.15) * finEnergy)
         finAmplitude += (balance - finAmplitude) * ease
@@ -527,7 +617,7 @@ struct FishStroke {
         // past straight once and the body settles. Larger fish curve less.
         let flexibility = species.bodyFlexibility
         let swing = (turnAcceleration * 0.07).clamped(to: -0.8...0.8)
-        let bendTarget = ((turnRate * 0.3 + swing) * flexibility * (hovering ? 0.15 : 1)).clamped(to: -1.4 * flexibility...1.4 * flexibility)
+        let bendTarget = ((turnRate * 0.3 + swing) * flexibility * (hovering ? 0.15 : 1) + restingBend).clamped(to: -1.4 * flexibility...1.4 * flexibility)
         bendVelocity += (Self.bendStiffness * (bendTarget - bend) - Self.bendDamping * bendVelocity) * delta
         bend += bendVelocity * delta
     }
