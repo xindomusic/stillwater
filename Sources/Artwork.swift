@@ -203,7 +203,10 @@ enum Artwork {
             let rect = poseRect(0, species: species)
             let crop = species.usesProfileAsset ? CGRect(x: 0, y: 0, width: full.width, height: full.height) : CGRect(x: CGFloat(rect.x) * CGFloat(full.width), y: 0,
                 width: CGFloat(rect.z) * CGFloat(full.width), height: CGFloat(full.height) / 2).integral
-            let scale = species.usesProfileAsset ? min(1, 640 / max(crop.width, crop.height)) : 1
+            // The shrimp is drawn so small that a finer texture only sparkles; its fine speckle
+            // is filtered out here rather than shimmering on screen.
+            let largest: CGFloat = species == .shrimp ? 320 : 640
+            let scale = species.usesProfileAsset ? min(1, largest / max(crop.width, crop.height)) : 1
             let context = CGContext(data: nil, width: Int(crop.width * scale), height: Int(crop.height * scale), bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
             context.interpolationQuality = .high

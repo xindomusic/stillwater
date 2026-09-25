@@ -656,7 +656,9 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
                 }
             }
             t.check(grazingStill > grazingStepping && grazingStepping > 500, "Grazing shrimp mostly stand and pick, with short steps between")
-            t.check(fleeingFrames > 30, "Hunting fish diving for food make shrimp flee (\(fleeingFrames) fleeing frames)")
+            // Flips are brief (ShrimpBehavior.flipDuration), and a threat from behind sends a shrimp
+            // straight up, so only a handful of frames per escape travel sideways.
+            t.check(fleeingFrames > 15, "Hunting fish diving for food make shrimp flee (\(fleeingFrames) fleeing frames)")
             t.check(Double(awayFrames) / Double(max(1, fleeingFrames)) > 0.9, "Shrimp dart away from the hunter, not toward it (\(awayFrames)/\(fleeingFrames))")
             var gentle = population([.shrimp: 10, .loach: 6, .danio: 10])
             gentle.theme = .river
@@ -915,7 +917,7 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             let all = Array(seen.values)
             for bubble in all {
                 let speed = bubble.riseSpeed * TankScale.waterHeightCM
-                t.check(speed >= 2 && speed <= 6, "Bubbles drift up slowly, 2 to 6 cm/s (\(speed))")
+                t.check(speed >= 1 && speed <= 3, "Bubbles drift up slowly, 1 to 3 cm/s (\(speed))")
                 if bubble.diameter < 0.7 { t.check(bubble.aspect < 1.01 && bubble.zigzagAmplitude == 0, "Tiny bubbles stay round and rise straight") }
             }
             // No stream: a source never lets go of bubbles in quick succession.

@@ -43,7 +43,7 @@ struct SandField {
         if strength > 0.25 && grains.count < Self.maximumGrains {
             grains.append(SandGrain(x: x, y: floor + TankScale.height(cm: 0.3), vx: TankScale.width(cm: dice.normal(deviation: 0.3)),
                 vy: TankScale.height(cm: 0.6), floor: floor, life: dice.value(2...3.5),
-                size: 6 + 8 * strength, depth: depth, isCloud: true))
+                size: 3 + 4 * strength, depth: depth, isCloud: true))
         }
     }
 
@@ -77,6 +77,6 @@ struct SandField {
     static func opacity(of grain: SandGrain) -> Double {
         let fadeIn = min(1, grain.age * 8)
         let fadeOut = min(1, (grain.life - grain.age) / (grain.isCloud ? 1.5 : 0.5))
-        return max(0, fadeIn * fadeOut) * (grain.isCloud ? 0.6 : 0.95)
+        return max(0, fadeIn * fadeOut) * (grain.isCloud ? 0.3 : 0.95)
     }
 }

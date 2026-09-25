@@ -9,7 +9,7 @@ enum FishRendering {
                            SKUniform(name: "u_legs", texture: Artwork.crabLegLabels)]
         // a_pixel: one screen pixel in the photograph's texture units, for antialiased drawn edges.
         shader.attributes = ["a_depth", "a_finPhase", "a_pose", "a_species", "a_pixel"].map { SKAttribute(name: $0, type: .float) }
-            + ["a_rect0", "a_stroke", "a_fins", "a_curve"].map { SKAttribute(name: $0, type: .vectorFloat4) }
+            + ["a_rect0", "a_stroke", "a_fins", "a_curve", "a_rock"].map { SKAttribute(name: $0, type: .vectorFloat4) }
             + ["a_sampleScale", "a_visibleY"].map { SKAttribute(name: $0, type: .vectorFloat2) }
         return shader
     }
@@ -76,9 +76,20 @@ enum FishRendering {
                         vec2 root = vec2(0.50 + float(k) * 0.07, 0.43);
                         float legPhase = phase - float(k) * 1.1;
                         float angle = sin(legPhase) * 0.28 * stroke.x * 2.0;
+                        // The two front pairs are claws: standing, they pick at the surface in quick
+                        // alternate strokes, reaching forward fast and drawing back more slowly.
+                        // Each stroke starts with the tip down on the surface and flicks forward and up to the mouth.
+                        float pickReach = 0.0;
+                        if (k >= 3) {
+                            float c = fract((fins.z + float(k - 3) * 3.14159265) / 6.2831853);
+                            pickReach = c < 0.25 ? c / 0.25 : 1.0 - (c - 0.25) / 0.75;
+                            angle += fins.w * 0.45 * pickReach;
+                        }
                         vec2 d = uv - root;
                         vec2 q = root + vec2(d.x * cos(angle) + d.y * sin(angle), -d.x * sin(angle) + d.y * cos(angle));
-                        q.y += max(0.0, cos(legPhase)) * 0.012 * stroke.x * 2.0 * smoothstep(0.0, 0.08, 0.43 - q.y);
+                        // The foot lifts off the sand as it swings forward.
+                        q.y -= max(0.0, cos(legPhase)) * 0.012 * stroke.x * 2.0 * smoothstep(0.0, 0.08, 0.43 - q.y);
+                        q.y += fins.w * 0.01 * (1.0 - pickReach) * step(3.0, float(k));
                         // Which leg the photographed point lies on: the rear legs slant back as they
                         // descend and the front legs slant forward.
                         float slant = -0.35 + float(k) * 0.16;
@@ -86,20 +97,32 @@ enum FishRendering {
                         if (gap < 0.04 && gap < bestGap) { bestGap = gap; source = q; }
                     }
                     // A photographed leg that has swung away leaves only water behind.
-                    uv = bestGap < 1.0 ? source : (uv.y < 0.37 && uv.x > 0.50 - (0.43 - uv.y) * 0.35 - 0.03 ? vec2(-1.0) : uv);
+                    // A photographed leg that has swung away leaves only water behind (the claws reach higher
+                    // under the head, so their old place is cleared further up).
+                    float cleared = uv.x > 0.68 ? 0.41 : 0.37;
+                    uv = bestGap < 1.0 ? source : (uv.y < cleared && uv.x > 0.50 - (0.43 - uv.y) * 0.35 - 0.03 ? vec2(-1.0) : uv);
                 }
-                // Swimmerets under the tail beat fast and in a rearward-running wave while swimming.
-                float swimmerets = smoothstep(0.24, 0.28, uv.x) * (1.0 - smoothstep(0.44, 0.48, uv.x)) * (1.0 - smoothstep(0.40, 0.45, uv.y)) * smoothstep(0.30, 0.36, uv.y);
-                uv.x += swimmerets * sin(fins.x * 2.5 + uv.x * 40.0) * 0.012 * fins.w;
+                // Swimmerets under the abdomen beat fast, in a wave running toward the tail, only
+                // while the shrimp swims (stroke.y).
+                float swimmerets = (1.0 - crab) * smoothstep(0.33, 0.37, uv.x) * (1.0 - smoothstep(0.53, 0.57, uv.x)) * (1.0 - smoothstep(0.40, 0.45, uv.y)) * smoothstep(0.30, 0.36, uv.y);
+                uv.x += swimmerets * sin(fins.x * 6.0 + uv.x * 40.0) * 0.014 * stroke.y;
+                // The two long antennae wave on their own rhythms, now and then sweeping wide.
                 float feeler = (1.0 - crab) * smoothstep(0.69, 0.9, uv.x) * smoothstep(0.52, 0.65, uv.y);
-                uv.y += feeler * sin(fins.x + uv.x * 6.0) * fins.w * 0.008;
+                float reach = smoothstep(0.69, 1.0, uv.x);
+                uv.y += feeler * reach * (sin(fins.x * 1.7 + uv.x * 6.0) * 0.03 + sin(fins.x * 0.45 + 1.0) * sin(fins.y * 0.8) * 0.03);
                 if (curl > 0.0 && crab < 0.5) {
-                    // Tail flip: the abdomen folds down under the body from just behind the carapace.
-                    float abdomen = 1.0 - smoothstep(0.38, 0.52, uv.x);
-                    float angle = -curl * 0.9 * abdomen;
-                    vec2 pivot = vec2(0.50, 0.46);
-                    vec2 offset = uv - pivot;
-                    uv = pivot + vec2(offset.x * cos(angle) - offset.y * sin(angle), offset.x * sin(angle) + offset.y * cos(angle));
+                    // Tail flip: the abdomen rolls down under the body from just behind the carapace, wrapped
+                    // round an arc whose radius shrinks as the flip deepens, so it keeps its length and
+                    // the fan tucks under the head in a C (about 170° at the deepest).
+                    vec2 pivot = vec2(0.54, 0.47);
+                    float bendRadius = 0.46 / (curl * 3.0 + 0.001);
+                    vec2 center = pivot - vec2(0.0, bendRadius);
+                    vec2 v = uv - center;
+                    float around = atan(-v.x, v.y);
+                    // The abdomen tapers as it curls toward the tail fan.
+                    float taper = 1.0 - 0.35 * clamp(around / 3.0, 0.0, 1.0);
+                    vec2 unrolled = vec2(pivot.x - bendRadius * around, pivot.y + (length(v) - bendRadius) / taper);
+                    if (around > 0.0 && unrolled.x < 0.56) { uv = unrolled; }
                 }
                 return uv;
             }
@@ -116,7 +139,7 @@ enum FishRendering {
             float power = stroke.x;
             // Rear-body flex grows towards the tail; the face stays anchored. An eel-like loach
             // ripples along its whole length as it works over the sand.
-            uv.y -= envelope * wave * power * mix(0.006, 0.05, loach);
+            uv.y -= envelope * wave * power * mix(0.006, 0.06, loach);
             uv.y -= loach * sin(phase * 0.5 - uv.x * 9.0) * (1.0 - smoothstep(0.72, 0.8, uv.x)) * 0.02;
             // Paused to sift, the rear of a loach never lies rigid: a slow ripple on its own clock.
             uv.y -= loach * min(1.0, stroke.z * 2.0) * sin(stroke.w - posterior * 4.0) * posterior * posterior * 0.022;
@@ -413,12 +436,19 @@ enum FishRendering {
             float waterMix = 0.025 + (1.15 - a_depth) * 0.065;
             color.rgb = mix(color.rgb, vec3(0.68,0.76,0.81) * color.a, waterMix);
             color.rgb *= u_brightness * mix(vec3(1.0), vec3(0.40,0.47,0.60), u_night);
-            if (a_species > 3.5 && a_species < 4.5 && a_stroke.z > 0.0) {
-                // A shrimp passes behind its refuge from the leading side. The
-                // visible part stays opaque instead of becoming a ghost silhouette.
-                float axis = mix(canvas.x,1.0 - canvas.x,a_stroke.w);
-                float edge = 1.06 - a_stroke.z * 1.12;
-                color *= 1.0 - smoothstep(edge - 0.025,edge + 0.025,axis);
+            if (a_species > 3.5 && a_species < 4.5 && abs(a_rock.z) > 0.0) {
+                // A shrimp behind a rock is hidden wherever the rock covers it: a dome standing on its
+                // base line (a_rock: base centre, half-width and height, in canvas units), with a
+                // slightly uneven edge. Nothing below the base line is ever hidden. Close to the rock
+                // the shrimp lies in its shadow.
+                float ragged = sin(canvas.y * 37.0 + canvas.x * 11.0) * 0.012;
+                vec2 radii = abs(a_rock.zw);
+                float r = length((canvas - a_rock.xy) / radii) + ragged;
+                // A negative height: the shrimp stands wholly behind the rock, so even the legs that
+                // reach below the base line are hidden.
+                float aboveBase = a_rock.w < 0.0 ? 1.0 : smoothstep(-0.02, 0.02, (canvas.y - a_rock.y) / radii.y);
+                color.rgb *= 1.0 - 0.3 * (1.0 - smoothstep(1.0, 1.25, r));
+                color *= 1.0 - (1.0 - smoothstep(0.97, 1.03, r)) * aboveBase;
             }
             gl_FragColor = color * v_color_mix.a;
             }

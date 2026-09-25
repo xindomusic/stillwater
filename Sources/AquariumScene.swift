@@ -10,6 +10,7 @@ private final class FishSprite: SKSpriteNode {
     let strokeValue = SKAttributeValue(vectorFloat4: .zero)
     let finsValue = SKAttributeValue(vectorFloat4: .zero)
     let curveValue = SKAttributeValue(vectorFloat4: .zero)
+    let rockValue = SKAttributeValue(vectorFloat4: .zero)
 }
 
 private final class PelletSprite: SKSpriteNode {
@@ -221,20 +222,41 @@ final class AquariumScene: SKScene {
             node.phaseValue.floatValue = Float(f.finPhase); node.setValue(node.phaseValue, forAttribute: "a_finPhase")
             // A shrimp's legs step while it walks and tuck while it swims or rests.
             // Off the sand (drifting, escaping, sinking back) the legs stay tucked.
-            let onSand = f.y <= AquariumSimulation.region(for: .shrimp, theme: configuration.theme).bottom + 0.035
-            let shrimpLegs: Float = f.shrimpBehavior.isEscaping || !onSand ? 0 : (f.shrimpBehavior.stepping || f.feeding != nil ? 0.45 : 0.06)
-            node.strokeValue.vectorFloat4Value = SIMD4(f.species == .shrimp ? shrimpLegs : Float(f.stroke.amplitude), Float(f.stroke.bend),
-                f.species == .shrimp ? Float(f.shrimpBehavior.concealment) : 0,
-                f.species == .shrimp && f.shrimpBehavior.coverOnLeft ? 1 : 0)
+            let onSand = f.shrimpBehavior.phase != .drifting && f.y <= AquariumSimulation.shrimpFloor(f, theme: configuration.theme) + 0.006
+            // On the sand the legs keep a full swing; they step only as far as the shrimp walks.
+            let shrimpLegs: Float = f.shrimpBehavior.isEscaping || !onSand ? 0 : 0.45
+            // Second component for a shrimp: how hard its swimmerets beat: fully while swimming, and
+            // now and then gently at rest, fanning water over itself.
+            let fanning = Float(max(0, sin(f.stroke.dorsalPhase * 0.2 + Double(f.id))) * 0.3)
+            let swimming: Float = f.shrimpBehavior.isEscaping || !onSand ? 1 : fanning
+            // A shrimp by its rock: the rock's outline in the sprite's canvas units, so the part of the
+            // shrimp behind it is hidden. Only a shrimp at or behind the rock's base line passes behind
+            // it; one in front stays in view.
+            var rock = SIMD4<Float>.zero
+            // Once its feet are behind the base line, the whole shrimp (legs too) is behind the rock:
+            // a negative height tells the shader to hide it wherever the dome covers it.
+            if f.species == .shrimp, let refuge = f.shrimpBehavior.refuge, f.y > refuge.center.y + 0.003, f.y < refuge.y + 0.04,
+               let framing, node.size.width > 0 {
+                let c = framing.point(x: refuge.center.x, y: refuge.center.y)
+                let k = Self.fishCanvas / node.size.width
+                rock = SIMD4(Float(0.5 + (c.x - node.position.x) * k), Float(0.5 + (c.y - node.position.y) * k),
+                             Float(refuge.radii.x * framing.imageRect.width * k), -Float(refuge.radii.y * framing.imageRect.height * k))
+            }
+            node.rockValue.vectorFloat4Value = rock; node.setValue(node.rockValue, forAttribute: "a_rock")
+            node.strokeValue.vectorFloat4Value = SIMD4(f.species == .shrimp ? shrimpLegs : Float(f.stroke.amplitude), f.species == .shrimp ? swimming : Float(f.stroke.bend), 0, 0)
             node.setValue(node.strokeValue, forAttribute: "a_stroke")
-            node.finsValue.vectorFloat4Value = SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.stroke.spread), Float(f.stroke.finAmplitude))
+            // A shrimp's third and fourth fin components carry its claws' picking rhythm and strength.
+            node.finsValue.vectorFloat4Value = f.species == .shrimp
+                ? SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.pickPhase + Double(f.id) * 2.4), Float(f.pickEnvelope))
+                : SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.stroke.spread), Float(f.stroke.finAmplitude))
             node.setValue(node.finsValue, forAttribute: "a_fins")
             var curve = f.spineCurve
             if f.species == .shrimp && f.shrimpBehavior.isEscaping {
                 // Fourth component: how far the shrimp's abdomen is folded in a tail flip.
                 let behavior = f.shrimpBehavior
                 let withinFlip = (behavior.escapeDuration - behavior.escapeRemaining).truncatingRemainder(dividingBy: ShrimpBehavior.flipDuration) / ShrimpBehavior.flipDuration
-                curve.w = Float(sin(withinFlip * .pi))
+                // The abdomen snaps shut fast and opens more slowly.
+                curve.w = Float(withinFlip < 0.3 ? sin(withinFlip / 0.3 * .pi / 2) : cos((withinFlip - 0.3) / 0.7 * .pi / 2))
             }
             if f.species == .crab {
                 // Legs: the axis the feet sweep along, how settled they are, and a bob of the shell
@@ -255,7 +277,8 @@ final class AquariumScene: SKScene {
             // in irregular spells; the fourth component is a slow resting ripple of its body.
             if f.species == .loach {
                 let spell = 0.5 + 0.5 * sin(f.siftClock * 0.9 + Double(f.id))
-                let jab = max(0, sin(f.siftClock * 2 * .pi * 1.8)) * spell
+                // Only a foraging loach jabs at the sand; a resting one just lies with its chin down.
+                let jab = f.burst.regime == .forage ? max(0, sin(f.siftClock * 2 * .pi * 1.8)) * spell : 0
                 node.strokeValue.vectorFloat4Value.z = Float(f.siftEnvelope * (0.55 + 0.45 * jab))
                 node.strokeValue.vectorFloat4Value.w = Float((f.siftClock * .pi).truncatingRemainder(dividingBy: 2 * .pi))
                 node.setValue(node.strokeValue, forAttribute: "a_stroke")
@@ -267,8 +290,10 @@ final class AquariumScene: SKScene {
                 // A fish's shadow is as long as the body looks: short when it faces the viewer.
                 let lengthShown = f.species == .crab ? 1.0 : 0.3 + 0.7 * abs(cos(f.yaw))
                 shadow.size = CGSize(width: body * (f.species == .loach ? 0.9 : 0.85) * lengthShown, height: body * (f.species == .loach ? 0.16 : (f.species == .crab ? 0.2 : 0.14)))
-                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species == .crab ? 0.12 : (f.species == .shrimp ? 0.24 : 0.08)))
+                shadow.position = CGPoint(x: node.position.x, y: node.position.y - body * (f.species == .crab ? 0.12 : (f.species == .shrimp ? 0.15 : 0.08)))
                 shadow.alpha = f.species == .shrimp ? 1 - f.shrimpBehavior.concealment : 1
+                // A shrimp behind a rock casts no shadow on the open sand in front of it.
+                if f.species == .shrimp, let r = f.shrimpBehavior.refuge, f.y > r.center.y, abs(f.x - r.center.x) < r.radii.x { shadow.alpha = 0 }
                 if f.species == .shrimp {
                     let bedTop = AquariumSimulation.region(for: .loach, theme: configuration.theme).top
                     if f.y > bedTop {
@@ -313,26 +338,34 @@ final class AquariumScene: SKScene {
         }
         let imageHeight = framing?.imageRect.height ?? size.height
         let imageSize = framing?.imageRect.size ?? size
+        let drawnBubbles = simulation.bubbleField.drawn
         for (i, bubble) in bubbleNodes.enumerated() where configuration.bubbles {
-            guard simulation.bubbles.indices.contains(i) else { bubble.alpha = 0; continue }
-            let state = simulation.bubbles[i]
+            guard drawnBubbles.indices.contains(i) else { bubble.alpha = 0; continue }
+            let state = drawnBubbles[i]
             bubble.position = framing?.point(x: state.x, y: state.y) ?? .zero
-            // Pops at the surface; appears as it detaches.
-            let top = simulation.visibleRegion.top
-            // Fades in as it forms, then pops at the surface.
-            bubble.alpha = CGFloat(min(1, state.age * 2.5) * min(1, max(0, top - state.y) * 40))
-            // Never smaller than a visible speck, so the fine mist still reads.
-            let diameter = max(2.5, TankScale.points(mm: state.diameter, imageHeight: imageHeight) * BubbleField.displayScale * ParticlePerspective.scale(state.depth))
+            bubble.alpha = CGFloat(state.alpha)
+            // Never smaller than a visible speck; the shader draws the tiniest as silver beads.
+            // A bead on a leaf is never smaller than a visible speck, and still visibly swells.
+            let floor = state.style == .bead ? max(2.5, 4.5 * pow(state.grow, 1.0 / 3)) : 2.5
+            let diameter = max(floor, TankScale.points(mm: state.diameter, imageHeight: imageHeight) * BubbleField.displayScale * ParticlePerspective.scale(state.depth))
             bubble.zPosition = ParticlePerspective.layer(state.depth)
-            bubble.depthValue.floatValue = Float(state.depth); bubble.setValue(bubble.depthValue, forAttribute: "a_depth")
+            // The depth also carries how to draw it: +10 a bead on a leaf, +20 a reflection in the
+            // surface film.
+            let code: Double
+            switch state.style {
+            case .rising: code = state.depth
+            case .bead: code = 10 + state.depth
+            case .reflection: code = 20 + state.depth
+            }
+            bubble.depthValue.floatValue = Float(code); bubble.setValue(bubble.depthValue, forAttribute: "a_depth")
             // Larger bubbles are slightly flattened and wobble gently as they sway; volume stays the same.
-            let rocking = state.zigzagAmplitude > 0 ? 1 + 0.05 * sin(4 * .pi * state.zigzagFrequency * state.age + state.phase) : 1
-            let aspect = state.aspect * rocking
+            let aspect = state.aspect
             bubble.size = CGSize(width: diameter * pow(aspect, 1.0 / 3), height: diameter / pow(aspect, 2.0 / 3))
             let w = Float(bubble.size.width / imageSize.width), h = Float(bubble.size.height / imageSize.height)
             bubble.waterRectValue.vectorFloat4Value = SIMD4(Float(state.x) - w / 2, Float(state.y) - h / 2, w, h)
             bubble.setValue(bubble.waterRectValue, forAttribute: "a_waterRect")
-            let bubbleEdge = (1 + ParticlePerspective.blur(state.depth)) / max(1, diameter / 2)
+            // Far bubbles are softer, as the camera focuses nearer.
+            let bubbleEdge = (1 + ParticlePerspective.blur(state.depth)) / max(1, diameter / 2) * (state.depth < 0.9 ? 1.5 : 1)
             bubble.edgeValue.floatValue = Float(min(0.6, bubbleEdge)); bubble.setValue(bubble.edgeValue, forAttribute: "a_edge")
         }
         let grains = simulation.sand.grains

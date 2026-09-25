@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0 — 2026-09-25
+
+- Loaches keep a daily rhythm like real kuhli loaches: long rests (sometimes at the foot of a rock, sometimes lying alongside others), long unhurried stretches of foraging with the nose down in the sand, and now and then a brisker roam. Speeds are mixed: mostly still or slow, some steady swimming, and occasional quick darts, sometimes in playful zigzag bursts that a neighbour joins. Every rest has its own pose, curved or angled; the head stays down while foraging instead of flicking up; a loach never darts into the end of the bed or into a neighbour.
+- Shrimp graze like cherry shrimp: the front claws pick at the sand in quick strokes while they stand, legs step exactly as far as they walk, antennae wave, and the swimmerets fan now and then at rest. A shrimp hides by walking behind a real rock in the scene and comes back out past its edge; a tail flip always drives it tail first, curling the abdomen under the body, and it settles back onto the sand afterwards. Shrimp no longer sparkle at desktop size, stand on loaches, or hide on open sand.
+- Bubbles are small, slow, and look like beads of glass: a dark lower edge, a brighter middle, a silver rim and a glint, with the tiniest drawn as a speck and a point of light. Leaves grow a bead for several seconds before it lets go; bubbles slow as they reach the surface, meet their own mirrored reflection in the surface film, rest a moment and wink out. They rise at about 2–3 cm/s, far fewer of them, from spots on the sand and on real leaves in each scene.
 ## 1.6.0 — 2026-09-24
 
 - Loaches keep their lanes on the sand: a loach never darts into a neighbour or a crab. Setting off with someone close ahead it turns back if there is room, or crawls diagonally across to another lane; a neighbour moving into its lane ends the dart and it coasts to a stop short of them. Loaches no longer pass through one another, stack, or line up nose to tail, and one boxed in by neighbours works its way free instead of parking.

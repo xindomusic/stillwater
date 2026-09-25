@@ -238,8 +238,10 @@ import UniformTypeIdentifiers
             }
             if species == .shrimp {
                 var coverage: [Int] = []
-                for hiding: Float in [0,0.5,1] {
-                    node.setValue(SKAttributeValue(vectorFloat4: SIMD4(0,0,hiding,0)), forAttribute: "a_stroke")
+                // A rock (a dome on a base line below the shrimp) that misses it, covers its right
+                // half, and covers all of it.
+                for rock: SIMD4<Float> in [SIMD4(3, 0.0, 0.4, 3), SIMD4(1.0, 0.0, 0.5, 3), SIMD4(0.5, 0.0, 3, 3)] {
+                    node.setValue(SKAttributeValue(vectorFloat4: rock), forAttribute: "a_rock")
                     let bytes = Self.pixels(view.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 256)
                     coverage.append(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 128 }.count)
                 }
