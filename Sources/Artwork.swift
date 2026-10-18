@@ -49,7 +49,8 @@ enum Artwork {
         return texture
     }
     /// Core Image filters run on the GPU through Metal; one shared context avoids re-creating pipelines.
-    private static let gpuImageContext = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
+    /// Marked like the other caches: newer SDKs call CIContext Sendable, the macOS 15 SDK on CI does not.
+    nonisolated(unsafe) private static let gpuImageContext = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
 
     /// A soft white dot for floating particles, tinted per sprite.
     nonisolated(unsafe) static let mote: SKTexture = {
