@@ -8,12 +8,12 @@
     <img alt="macOS 14 or later, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-697586">
     <a href="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml"><img alt="Build and test" src="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml/badge.svg"></a>
   </p>
-  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v1.8.0/Stillwater-1.8.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v1.8.0/Stillwater-1.8.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
+  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.0/Stillwater-2.0.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.0/Stillwater-2.0.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
 </div>
 
 ![Riverlight: clear freshwater, planted river stones, and Asian freshwater fish](docs/images/riverlight.png)
 
-Stillwater turns your desktop into a planted freshwater aquarium. Each fish chooses its own changing route, pace, and rest periods. Fish glide, explore, and react to food, with individual fin rhythms, bending turns, and a gently level posture. Shrimp alternate grazing, drifting, and hiding near cover; crabs crawl across the sand with eight staggered walking legs. Daylight fades into a softer night scene with your Mac’s appearance. Keep it alive in the background, or freeze a moment as a still wallpaper.
+Stillwater turns your desktop into a planted freshwater aquarium. Each fish chooses its own changing route, pace, and rest periods. Fish glide, explore, and react to food, with individual fin rhythms, bending turns, and a gently level posture. Shrimp alternate grazing, drifting, and hiding near cover; crabs crawl across the sand with eight staggered walking legs. Daylight fades into a softer night scene with your Mac’s appearance. Keep it alive in the background, freeze a moment as a still wallpaper, or open a window and **go fishing**.
 
 Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **No account, ads, subscriptions, analytics, or runtime downloads.**
 
@@ -23,6 +23,7 @@ Native Swift, AppKit, SwiftUI, and SpriteKit. Everything is bundled locally. **N
 | --- | --- |
 | **Three original scenes** | Riverlight, Sunken Grove, and Willow Springs, with clear water, plants, sand, stones, and roots. |
 | **Ten resident choices** | Eight fish varieties in different sizes and colors, plus cherry shrimp and Thai micro crabs. Set each population from 0–30, up to 120 total. |
+| **Go fishing** | New in 2.0. Pick a hook and a bait or lure, cast into your own tank, strike when the float slides under, play the fish, and let it go. |
 | **Responsive feeding** | Shaded pellets tumble through near and far water in staggered sprinkles. Fish notice, approach, nibble, and drift apart. |
 | **Day and night** | Follow macOS Light/Dark appearance, including its automatic schedule, or choose Day or Night. |
 | **Gentle atmosphere** | Leaf sway, rippling surface water, drifting light, optional particles, and streams of real-size bubbles rising from air stones in the sand. Residents stir the sand as they forage. |
@@ -107,7 +108,7 @@ An enlarged shader demonstration of hovering, articulated turns, and dashing. Ca
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14 or later. The published binary is arm64. Local rendering was tested on an M4 with macOS 27; see [validation](VALIDATION.md) for coverage and limits.
 
-**First launch:** v1.8.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
+**First launch:** v2.0.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
 
 Closing settings leaves the aquarium running. **Quit Stillwater** from the fish menu to reveal your underlying wallpaper. To launch at login, add Stillwater through macOS Login Items.
 
@@ -120,6 +121,23 @@ Closing settings leaves the aquarium running. **Quit Stillwater** from the fish 
 | Open settings while Stillwater is active | **Command–comma** (`⌘,`) |
 
 The **Feed fish** button and menu command do the same thing. Feeding requires Live mode, nonzero swimming speed, and at least one resident. Shrimp and crabs forage for sinking pellets near the sand. Portions have a short cooldown and a limit to keep the water uncluttered. Disable the global shortcut in **Motion & light**; if another app owns the combination, the button and local shortcut remain available.
+
+## Go fishing
+
+Choose **Go Fishing…** from the fish menu (or press ⌘G in Stillwater, or use **Fishing** in settings). A window opens onto your aquarium with a rod in hand; your desktop aquarium stays undisturbed.
+
+![Fishing: a golden barb has taken the bread and the float slides under](docs/images/fishing.png)
+
+| Action | How |
+| --- | --- |
+| Cast | Click the water where you want the bait. Under a float, it hangs at the depth you click. |
+| Strike, or twitch the bait | Click (or Space) |
+| Reel in, or retrieve a lure | Hold the mouse button (or Space) |
+| Bring the line straight in | Esc, or **Reel in** |
+
+**Tackle.** A No. 18 fine-wire hook fits small mouths; a No. 12 J-hook suits gouramis; a No. 6 circle hook is for the koi and sets itself, so don't strike. Fish bloodworm, bread, or a soaked pellet under a float, or try a dry fly on the surface, a micro spinner (it only flashes while you reel), or a soft worm jig hopped along the sand.
+
+**The fish.** They look a bait over, then refuse it, nibble it off the hook, or take it, and the float slides under. Small fish strip a big hook bare; shrimp and crabs steal from the bottom, and a crab may cling to the bait as you reel. Splashes scatter the shy ones while the bold ones come to look. Small fish are swung straight out; barbs, gouramis, and koi run. Reel while the fish rests and let go when it runs, or the line snaps. Keep the line tight, or it throws the hook. Every catch is measured, weighed, added to your catch log, and released unharmed, and stays a little hook-shy afterwards.
 
 ## Live, still, or saved
 
@@ -147,7 +165,7 @@ No third-party packages are required. Build scripts target Apple Silicon and mac
 zsh tools/package.sh
 ```
 
-See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v1.8.0.md).
+See [development notes](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [latest release notes](docs/releases/v2.0.0.md).
 
 ## How it works
 

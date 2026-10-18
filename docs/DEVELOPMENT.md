@@ -14,11 +14,15 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 | `Sources/Simulation.swift` | The simulation step: moods, steering, banked turns, depth, and bubbles |
 | `Sources/SimulationFeeding.swift` | Feeding extension: dropping pellets, noticing food, and eating |
 | `Sources/SimulationBed.swift` | Sand-bed extension: lanes, resting spots, and keeping bed neighbours apart |
+| `Sources/Fishing.swift` | Fishing model: hooks, baits and lures, what each species makes of them, the rig, events, and the catch log |
+| `Sources/SimulationFishing.swift` | Fishing extension: casting, sinking and retrieving, fish noticing, inspecting, nibbling, taking and following, strikes, spooking, the fight, landing and release |
 | `Sources/WallpaperStills.swift` | Saved wallpaper stills, retained for other Spaces and disconnected displays, with the count/size summary Settings shows |
 | `Sources/AquariumScene.swift` | SpriteKit rendering, body/fin shaders, day/night fade, particles, and pause behavior |
 | `Sources/Artwork.swift` | Images, pose rectangles, cached motion masks, and contact shadows |
 | `Sources/FishRendering.swift` | Continuous curved-body projection and body/fin motion |
 | `Sources/PelletRendering.swift` | Rounded pellet volumes, tumble, surface shading, and distance contrast |
+| `Sources/FishingRendering.swift` | Drawn tackle (hooks, float, baits, lures), the line through the surface, splash rings, crumbs, and the strike cue |
+| `Sources/FishingWindow.swift` | The fishing window: mouse and keyboard control, status messages, tension and bait meters, catch card, toolbar |
 | `Sources/BubbleRendering.swift` | Refractive bubble shading and directional highlights |
 | `Sources/WaterRendering.swift` | Masked vegetation sway, surface ripples, and moving light |
 | `Sources/SettingsView.swift` | Native light/dark settings interface |
@@ -26,6 +30,8 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 | `Sources/ReviewMode.swift` | `--review` native verification and release report |
 | `Sources/FeedingShortcut.swift` | Registration and cleanup of one global keyboard shortcut |
 | `Tests/ModelTests.swift` | Deterministic behavioral and settings checks, as named cases that all run and all report |
+| `Tests/FishingTranscript.swift` | Scripted anglers fishing every hook and bait headlessly, reporting bites, catches, and losses |
+| `Tests/FishingCapture.swift` | Renders scripted fishing sessions and the fishing window for visual review |
 
 ## Build and test
 
@@ -81,6 +87,18 @@ The scene is scaled as a tank about 30 cm tall, so particles move at physical sp
 Food is slow-sinking community micro-pellets of about 1.1–2 mm, falling nearly straight at about 1–1.5 cm/s: slightly irregular soaked granules with a wet sheen and individual tints. Distant pellets and bubbles are smaller, lower in contrast, bluer, and softly out of focus.
 
 Loaches pausing to nose into the sand, crabs setting off, shrimp picking, and any fish taking food off the bottom throw up irregular sand grains that settle back, and the stronger disturbances leave a pale silt cloud. Residents lying on the bed keep apart by their actual lengths, side by side along the sand, when they share a depth, and touching bodies slide gently apart; a walking crab that meets a neighbour stops and sets off the other way. Crabs keep to the nearer part of the bed and loaches to the farther part, so they pass in front of each other rather than piling up. Air stones are drawn with sand in the scene's own colour heaped against their base. A shrimp's abdomen folds under it in each tail flip, and afterwards it sinks back nose-down.
+
+### Fishing
+
+Fishing lives in its own window (`FishingController`); the desktop aquarium never has a line in it. The rig (`FishingRig`) is part of that window's `AquariumSimulation`, so a cast, a bite, and a fight replay exactly in tests. Without a rig, or with one that is not cast, the fish behave exactly as before: the angling code draws no dice until a rig is in the water.
+
+**Tackle.** Three hooks, sized against the drawn fish: a No. 18 fine wire hook (fits small mouths, hides in the bait, light: it opens out if cranked against a strong run), a No. 12 J-hook (mid-sized mouths), and a No. 6 circle hook (sets itself as a fish turns away with the bait, almost never comes out, holds bait well; only a koi's mouth really fits it). Baits (bloodworm, bread, soaked pellet) hang under a float at the depth clicked; split shot sinks them at about 5 cm/s in the 30 cm tank and cocks the float upright as it settles. Lures are fished without a float: a dry fly rides the surface film, a micro spinner flutters down and only flashes while retrieved, a soft worm jig sinks to the sand and hops on a twitch. Bread falls apart and sheds crumbs.
+
+**What fish do.** Each resident has an appetite for each offering, a caution, an aggression toward lures, a mouth that fits some hooks and not others, a bite size, and how long it mouths a bait. Bait reaches fish by scent that spreads over the first seconds in the water; lures by moving like prey. A fish that notices swims over and looks the bait over from a body length away, then refuses it, picks pieces off it, or takes it. Big mouths inhale a bait; small ones nibble, so small fish strip a big hook. Taking it, a fish turns away with the bait in its mouth for 0.6 to 2 seconds while the float slides under (a danio barely dips it, a koi drags it right down); strike in that window and a hook that fits sets, strike in the first tenth of a second and the bait is pulled from its lips. Unstruck, the fish spits it, unless a circle hook catches in the corner of its jaw. Followers trail a retrieved lure and hit it as it swims or as it falters. Splashes, strikes, and fish fighting on the line scatter the others, but the bold ones half expect food and come to look. Shrimp and crabs pick at a bait on the sand but cannot be hooked; a crab may hang on and ride up as the line comes in. A fish that felt the hook is wary for minutes, and each catch leaves it a little warier for good.
+
+**The fight.** A fish of a gram or two is simply swung out with the rod. Golden barbs, gouramis, and koi run and rest: a running fish takes line through the drag (80% of what the hook holds), which caps the pressure on a still reel, but cranking into a run shocks the line past it, and too much pressure for a third of a second straightens a fine hook or breaks the line. A slack line lets a head-shaking fish throw a barbed hook within a few seconds; a circle hook almost never comes out. Pressure and running tire the fish; a beaten fish is netted at the surface, measured (each individual keeps one size), weighed (W = a·L³ with a body-shape factor), logged, and put back.
+
+`zsh tools/fishing-transcript.sh [minutes]` lets scripted anglers fish every hook and bait and prints catch, bite, and loss rates; `--story` prints the event-by-event story of a few sessions. `zsh tools/fishing-capture.sh` renders key moments, the fishing window, a contact sheet, and a fight GIF into `build/fishing-review/` (graphical session needed).
 
 ### Turning like a fish
 

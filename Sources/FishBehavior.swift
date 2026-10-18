@@ -113,6 +113,12 @@ struct FishState: Identifiable {
     var appetite = 1.0
     var feeding: FeedingResponse?
     var feedingCooldown = 0.0
+    /// What this fish is doing about the angler's bait or lure, if anything.
+    var angling: AnglingResponse?
+    /// Hook-shyness, 0...1: a fish that felt the hook, or was caught, is slow to trust bait again.
+    var wariness = 0.0
+    /// What a fish keeps from being caught: wariness never fades below this.
+    var learned = 0.0
     /// Species-specific behavior; only the matching payload exists for a given resident.
     var speciesBehavior: SpeciesBehavior
 
@@ -153,9 +159,13 @@ struct FishState: Identifiable {
     /// Going for food: noticing, approaching, or nibbling. A fish leaving after a meal
     /// swims like a wanderer again, so it glides away instead of pivoting on the spot.
     var isChasingFood: Bool {
+        if let phase = angling?.phase { return phase.isFocused }
         guard let phase = feeding?.phase else { return false }
         return phase != .leaving
     }
+
+    /// Busy with food or with the angler's bait, rather than wandering.
+    var isEngaged: Bool { feeding != nil || angling != nil }
 
     var spineCurve: SIMD4<Float> {
         species.isInvertebrate ? .zero : stroke.spineCurve(phase: finPhase, species: species)

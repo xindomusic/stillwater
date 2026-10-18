@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0 — 2026-10-18
+
+- **Go fishing.** A new fishing window (fish menu → Go Fishing…, ⌘G in Stillwater, or Settings → Fishing) opens onto your aquarium with a rod in hand; the desktop aquarium is never disturbed. Click the water to cast there, click to strike, hold to reel, Esc to bring the line in.
+- **Tackle that matters.** Three hooks: a No. 18 fine-wire hook for small mouths (light, so a strong fish can open it out), a No. 12 J-hook for gouramis, and a No. 6 circle hook for the koi that sets itself and almost never comes out. Three baits fished under a float at the depth you click (bloodworm, bread that crumbles away, soaked pellet) and three lures: a dry fly on the surface film, a micro spinner that only flashes while you reel, and a soft worm jig hopped along the sand.
+- **Fish that behave like fish.** Bait reaches them by scent, lures by moving like prey. A fish swims over and looks it over, then refuses it, nibbles bits off the hook, or takes it, turning away while the float slides under (a danio barely dips it, a koi drags it right down). Small fish strip a big hook bare; shrimp and crabs steal bait off the sand and a crab may cling on as you reel. Followers trail a lure and hit it as it swims or falters. Splashes and fights scatter the shy ones while the bold ones come to look, and a fish that felt the hook stays wary, a little more after every catch.
+- **A fight with real risk.** Small fish are swung straight out. Barbs and gouramis dive and shake their heads; horse one and the hook tears free. A koi runs and takes line through the drag: reel while it rests, let go when it runs, or the line snaps; let the line go slack and it throws the hook.
+- **Readable on the water.** The float cocks upright as split shot settles the bait (and stays flat if a fish takes it on the drop), pecks ripple the film, an orange pulse marks the moment to strike, and a glow-stick tip lights the float at night. A tension meter with a RUN badge, a bait meter, plain-language messages, optional soft sounds, and VoiceOver announcements tell you what is happening.
+- **Catch and release, and a log to fill.** Every fish is measured (each keeps its own size), weighed, shown on a catch card with personal bests and new species, and released. Settings → Fishing keeps a lifetime catch log for all eight hookable species, with field notes on what each one takes, and a tackle guide.
+- Under the hood: the angling model is deterministic and fully tested (11 new model checks and a rendering check), and two new tools let scripted anglers fish every hook and bait headlessly (`tools/fishing-transcript.sh`) and render fishing moments for review (`tools/fishing-capture.sh`). CI runs the scripted anglers. Nothing changes in the desktop aquarium: without a line in the water, every fish makes exactly the same choices as before.
+
 ## 1.8.0 — 2026-10-17
 
 - Saved wallpapers are retained until manually removed, protecting images still used by other Spaces or disconnected displays. Settings now shows how many stills are saved and how much space they take, with a button to open their folder, so they no longer accumulate invisibly.

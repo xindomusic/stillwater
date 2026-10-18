@@ -16,6 +16,7 @@ final class DesktopWindow: NSWindow {
     // Members without `private` are also used by the `--review` extension in ReviewMode.swift.
     var settingsWindow: NSWindow?
     var previewWindow: NSWindow?
+    var fishingController: FishingController?
     var desktopWindows: [DesktopWindow] = []
     private var statusItem: NSStatusItem?
     private let feedingShortcut = FeedingShortcut()
@@ -39,6 +40,7 @@ final class DesktopWindow: NSWindow {
         createStatusItem()
         subscribeToSystem()
         store.feedRequests.sink { [weak self] in self?.allSurfaces().forEach { $0.aquarium.feed() } }.store(in: &subscriptions)
+        store.fishingRequests.sink { [weak self] in self?.showFishing() }.store(in: &subscriptions)
         store.$configuration.sink { [weak self] next in self?.apply(next) }.store(in: &subscriptions)
         showSettings()
         print("Stillwater ready · global feeding shortcut: \(store.feedingShortcutAvailable ? FeedingShortcut.label : "unavailable or disabled")")
@@ -57,6 +59,7 @@ final class DesktopWindow: NSWindow {
         let app = NSMenu(title: "Stillwater")
         app.addItem(withTitle: "Stillwater Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
         app.addItem(withTitle: "Feed Fish", action: #selector(feedFish), keyEquivalent: "f").target = self
+        app.addItem(withTitle: "Go Fishing…", action: #selector(showFishing), keyEquivalent: "g").target = self
         app.addItem(.separator())
         app.addItem(withTitle: "Quit Stillwater", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         root.submenu = app; menu.addItem(root)
@@ -92,6 +95,7 @@ final class DesktopWindow: NSWindow {
         let feed = menu.addItem(withTitle: "Feed Fish", action: #selector(feedFish), keyEquivalent: "f")
         feed.target = self
         if store.feedingShortcutAvailable { feed.keyEquivalentModifierMask = [.control, .option, .command] }
+        menu.addItem(withTitle: "Go Fishing…", action: #selector(showFishing), keyEquivalent: "").target = self
         menu.addItem(.separator())
         for mode in AquariumMode.allCases {
             let item = NSMenuItem(title: mode == .live ? "Live aquarium" : "Still image", action: #selector(selectMode(_:)), keyEquivalent: "")
@@ -168,6 +172,22 @@ final class DesktopWindow: NSWindow {
         refreshPauseState()
     }
 
+    /// A window of its own with a line in the water. The desktop aquarium stays undisturbed.
+    @objc func showFishing() {
+        if fishingController == nil {
+            let controller = FishingController(store: store)
+            controller.onClose = { [weak self] in
+                guard let self else { return }
+                self.fishingController = nil
+                self.refreshPauseState()
+            }
+            controller.onVisibilityChange = { [weak self] in self?.refreshPauseState() }
+            fishingController = controller
+        }
+        fishingController?.show()
+        refreshPauseState()
+    }
+
     @objc func showPreview() {
         if previewWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 630), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -227,6 +247,7 @@ final class DesktopWindow: NSWindow {
         if lastDisplayMode != config.allDisplays || lastWallpaperEnabled != config.wallpaperEnabled { rebuildDesktop(config) }
         for window in desktopWindows { (window.contentView as? AquariumSurface)?.apply(config) }
         (previewWindow?.contentView as? AquariumSurface)?.apply(config)
+        if let fishing = fishingController { fishing.surface.apply(config); fishing.refreshAvailability() }
         updateMenu(config)
         refreshPauseState()
     }
@@ -261,11 +282,11 @@ final class DesktopWindow: NSWindow {
         return view.subviews.flatMap { surfaces(in: $0) }
     }
     func allSurfaces() -> [AquariumSurface] {
-        (desktopWindows as [NSWindow] + [settingsWindow, previewWindow].compactMap { $0 }).flatMap { surfaces(in: $0.contentView) }
+        (desktopWindows as [NSWindow] + [settingsWindow, previewWindow, fishingController?.window].compactMap { $0 }).flatMap { surfaces(in: $0.contentView) }
     }
     private func refreshPauseState() {
         let systemPaused = !pauseReasons.isEmpty || ProcessInfo.processInfo.thermalState == .critical
-        for window in desktopWindows as [NSWindow] + [settingsWindow, previewWindow].compactMap({ $0 }) {
+        for window in desktopWindows as [NSWindow] + [settingsWindow, previewWindow, fishingController?.window].compactMap({ $0 }) {
             let hidden = !window.isVisible || window.isMiniaturized || !window.occlusionState.contains(.visible)
             for surface in surfaces(in: window.contentView) {
                 let paused = systemPaused || hidden

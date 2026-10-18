@@ -55,6 +55,9 @@ final class AquariumScene: SKScene {
     private let bubbleShader = BubbleRendering.makeShader()
     private let pelletShader = PelletRendering.makeShader()
     private var appliedNight = -1.0
+    private var fishingLayer: FishingLayer?
+    /// Called after each simulated frame while a line is out, for the fishing window's readouts.
+    var afterFishingStep: (() -> Void)?
 
     init(size: CGSize, configuration: AquariumConfiguration) {
         self.configuration = configuration
@@ -177,6 +180,32 @@ final class AquariumScene: SKScene {
 
     func feed() { simulation.feed(configuration); positionContents() }
 
+    // MARK: Fishing
+
+    var rig: FishingRig? { simulation.rig }
+    func startFishing(hook: HookKind, offering: Offering) { simulation.startFishing(hook: hook, offering: offering); positionContents() }
+    func stopFishing() { simulation.stopFishing(); positionContents() }
+    func changeTackle(hook: HookKind, offering: Offering) { simulation.changeTackle(hook: hook, offering: offering) }
+    func strike() { simulation.strike() }
+    func setReeling(_ on: Bool) { simulation.setReeling(on) }
+    func reelIn() { simulation.reelIn() }
+    func drainFishingEvents() -> [FishingEvent] { simulation.drainFishingEvents() }
+    /// Casts toward a point in normalized scene coordinates (0...1 across the artwork).
+    @discardableResult func cast(x: Double, y: Double) -> Bool { simulation.cast(x: x, y: y) }
+    /// Casts toward a point in scene (SpriteKit) coordinates. Returns false while the line is out.
+    @discardableResult func cast(toward point: CGPoint) -> Bool {
+        guard let framing, framing.imageRect.width > 0 else { return false }
+        let x = Double((point.x - framing.imageRect.minX) / framing.imageRect.width)
+        let y = Double((point.y - framing.imageRect.minY) / framing.imageRect.height)
+        return simulation.cast(x: x, y: y)
+    }
+    /// The water surface where the line goes in, in scene coordinates, for the window's cursor.
+    func isInWater(_ point: CGPoint) -> Bool {
+        guard let framing, framing.imageRect.height > 0 else { return false }
+        let y = Double((point.y - framing.imageRect.minY) / framing.imageRect.height)
+        return y < AquariumSimulation.rigSurface(theme: configuration.theme, visible: simulation.visibleRegion)
+    }
+
     func resetClock() { previousTime = nil }
 
     override func update(_ currentTime: TimeInterval) {
@@ -188,6 +217,7 @@ final class AquariumScene: SKScene {
         if abs(nightTarget - nightAmount) < 0.001 { nightAmount = nightTarget }
         simulation.step(delta: currentTime - previousTime, configuration: swimmingConfiguration)
         positionContents()
+        if simulation.rig != nil { afterFishingStep?() }
     }
 
     private func positionContents() {
@@ -200,6 +230,11 @@ final class AquariumScene: SKScene {
         let scale = artworkScale
         for f in simulation.fish {
             guard let node = fishNodes[f.id] else { continue }
+            // A fish in the angler's net is out of the water until it is put back.
+            let outOfWater = f.angling?.phase == .landed
+            node.isHidden = outOfWater
+            fishShadows[f.id]?.isHidden = outOfWater
+            if outOfWater { continue }
             // Depth changes during turns, so size, layering, and water tint follow it every frame.
             let body = f.species.bodySize * f.depth * scale
             node.size = CGSize(width: body * Self.fishCanvas, height: body * Self.fishCanvas)
@@ -269,6 +304,9 @@ final class AquariumScene: SKScene {
             if !f.species.isInvertebrate, let response = f.feeding, response.phase == .nibbling {
                 let envelope = min(1, response.age * 6) * min(1, max(0, response.remaining) * 6)
                 bite = sin(response.age * 18) * 0.045 * envelope
+            } else if !f.species.isInvertebrate, let angling = f.angling, angling.phase == .nibbling, angling.backOff > 0 {
+                // A peck: the head snaps at the bait and jerks back.
+                bite = sin(angling.age * 22) * 0.06 * min(1, angling.backOff * 3)
             } else { bite = 0 }
             // A shrimp sinking back after a flip tips nose-down.
             let sinking = f.species == .shrimp && !f.shrimpBehavior.isEscaping && f.vy < -TankScale.height(cm: 0.5) ? -0.25 : 0.0
@@ -294,6 +332,11 @@ final class AquariumScene: SKScene {
                 shadow.alpha = f.species == .shrimp ? 1 - f.shrimpBehavior.concealment : 1
                 // A shrimp behind a rock casts no shadow on the open sand in front of it.
                 if f.species == .shrimp, let r = f.shrimpBehavior.refuge, f.y > r.center.y, abs(f.x - r.center.x) < r.radii.x { shadow.alpha = 0 }
+                // A crab carried up on the bait, or tumbling back, leaves the sand.
+                if f.species == .crab, let phase = f.angling?.phase, phase == .gripping || phase == .dropping {
+                    let bedTop = AquariumSimulation.region(for: .crab, theme: configuration.theme).top
+                    shadow.alpha = CGFloat(max(0, 1 - (f.y - bedTop) / 0.03))
+                }
                 if f.species == .shrimp {
                     let bedTop = AquariumSimulation.region(for: .loach, theme: configuration.theme).top
                     if f.y > bedTop {
@@ -328,6 +371,12 @@ final class AquariumScene: SKScene {
             node.seedValue.floatValue = Float(pellet.phase); node.setValue(node.seedValue, forAttribute: "a_seed")
             let pelletEdge = (1 + ParticlePerspective.blur(pellet.depth)) / max(1, diameter / 2)
             node.edgeValue.floatValue = Float(min(0.6, pelletEdge)); node.setValue(node.edgeValue, forAttribute: "a_edge")
+        }
+        if let rig = simulation.rig, let framing {
+            if fishingLayer == nil { let layer = FishingLayer(); addChild(layer); fishingLayer = layer }
+            fishingLayer?.update(rig: rig, framing: framing, scale: scale, night: nightAmount)
+        } else if let layer = fishingLayer {
+            layer.removeFromParent(); fishingLayer = nil
         }
         for (i, dot) in motes.enumerated() where configuration.particles {
             let n = Double(i)

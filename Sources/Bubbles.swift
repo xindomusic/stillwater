@@ -117,11 +117,7 @@ struct BubbleField {
         clinging.removeAll()
         surfaced.removeAll()
         sources.removeAll()
-        switch theme {
-        case .river: horizon = 0.76
-        case .grove: horizon = 0.75
-        case .spring: horizon = 0.72
-        }
+        horizon = Self.horizon(theme)
         let width = visible.right - visible.left
         for k in 0..<4 {
             let x = visible.left + width * (Double(k) + 0.5 + dice.value(-0.25...0.25)) / 4
@@ -141,6 +137,20 @@ struct BubbleField {
             sources.append(BubbleSource(kind: .plant, x: leaf.x, y: leaf.y, depth: leaf.depth, rate: 0.07,
                 medianSize: 1.2, nextIn: dice.value(0...8), jitter: leaf.depth < 0.8 ? 0 : 0.08))
         }
+    }
+
+    /// Where the water surface meets the far back of each scene, in scene heights.
+    static func horizon(_ theme: AquariumTheme) -> Double {
+        switch theme {
+        case .river: return 0.76
+        case .grove: return 0.75
+        case .spring: return 0.72
+        }
+    }
+
+    /// The water surface seen from below: something farther back meets it lower on the screen.
+    static func surfaceY(theme: AquariumTheme, depth: Double, visible: SwimRegion) -> Double {
+        min(visible.top, horizon(theme) + 0.2 * ((depth - 0.5) / 0.9).clamped(to: 0...1))
     }
 
     /// The water surface seen from below: a bubble farther back meets it lower on the screen.

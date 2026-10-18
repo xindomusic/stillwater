@@ -21,10 +21,13 @@ private enum Palette {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case aquarium = "My aquarium", scenes = "Scenes", fish = "Fish & friends", motion = "Motion & light"
+    case aquarium = "My aquarium", scenes = "Scenes", fish = "Fish & friends", fishing = "Fishing", motion = "Motion & light"
     var id: String { rawValue }
     var icon: String {
-        switch self { case .aquarium: return "water.waves"; case .scenes: return "square.stack.3d.up"; case .fish: return "fish"; case .motion: return "slider.horizontal.3" }
+        switch self {
+        case .aquarium: return "water.waves"; case .scenes: return "square.stack.3d.up"; case .fish: return "fish"
+        case .fishing: return "figure.fishing"; case .motion: return "slider.horizontal.3"
+        }
     }
 }
 
@@ -69,6 +72,7 @@ struct SettingsView: View {
                         case .aquarium: overview
                         case .scenes: scenesPanel
                         case .fish: fishPanel
+                        case .fishing: fishingPanel
                         case .motion: motionPanel
                         }
                     }.padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 28)
@@ -164,6 +168,10 @@ struct SettingsView: View {
                             .padding(.horizontal, 13).padding(.vertical, 11).background(.white.opacity(0.12), in: Capsule())
                     }.buttonStyle(.plain).disabled(!store.canFeed)
                         .help("Feed fish: ⌘F in Stillwater, or Control–Option–Command–F from any app when enabled. Requires Live mode and swimming.")
+                    Button { store.requestFishing() } label: {
+                        Label("Go fishing", systemImage: "figure.fishing").font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 13).padding(.vertical, 11).background(.white.opacity(0.12), in: Capsule())
+                    }.buttonStyle(.plain).help("Open a fishing window: cast a line, hook a fish, and let it go (⌘G)")
                     Button(action: previewAction) { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 13)).padding(12).background(.white.opacity(0.12), in: Circle()) }
                         .buttonStyle(.plain).help("Open a larger aquarium preview").accessibilityLabel("Open larger preview")
                 }.padding(25).foregroundStyle(.white)
@@ -297,6 +305,69 @@ struct SettingsView: View {
             store.configuration = next
         } label: { Text(title).font(.system(size: 11)).padding(.horizontal, 14).padding(.vertical, 10).background(Palette.card, in: Capsule()).overlay(Capsule().stroke(Palette.border)) }
             .buttonStyle(.plain)
+    }
+
+    /// Fish that can be hooked; shrimp and crabs only steal bait.
+    private var anglingSpecies: [FishSpecies] { FishSpecies.allCases.filter { !$0.isInvertebrate } }
+
+    private var fishingPanel: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 18) {
+                Image(systemName: "figure.fishing").font(.system(size: 30, weight: .light)).foregroundStyle(Palette.accent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Cast a line into your own aquarium.").font(.system(size: 15, weight: .medium))
+                    Text("Pick a hook and a bait or lure, click the water to cast, and watch the float. Fish look it over, nibble, steal the bait, or take it. Strike, play the fish, and let it go.")
+                        .font(.system(size: 11)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 10)
+                Button { store.requestFishing() } label: {
+                    Label("Go fishing", systemImage: "arrow.right").font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 11).background(Palette.accent.opacity(0.12), in: Capsule())
+                }.buttonStyle(.plain).foregroundStyle(Palette.accent).disabled(!store.canFeed)
+                    .help(store.canFeed ? "Open the fishing window (⌘G)" : "Fishing needs the Live aquarium, swimming, and some fish")
+            }.padding(20).background(Palette.card, in: RoundedRectangle(cornerRadius: 13)).overlay(RoundedRectangle(cornerRadius: 13).stroke(Palette.border))
+            HStack {
+                Text("CATCH LOG").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(Palette.muted)
+                Spacer()
+                Text("\(store.angling.landed) landed · \(store.angling.hooked) hooked · \(store.angling.lost) lost · \(store.angling.baitsStolen) baits stolen · \(store.angling.casts) casts")
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(Palette.muted)
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                ForEach(anglingSpecies) { species in
+                    let tally = store.angling.tally(species)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Image(nsImage: Artwork.fishImage(species)).resizable().aspectRatio(contentMode: .fit).frame(height: 54)
+                            .frame(maxWidth: .infinity).opacity(tally.count > 0 ? 1 : 0.22).saturation(tally.count > 0 ? 1 : 0)
+                        Text(species.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                        Text(tally.count > 0 ? String(format: "%d caught · best %.1f cm", tally.count, tally.bestCM) : "Not caught yet")
+                            .font(.system(size: 10)).foregroundStyle(tally.count > 0 ? Palette.accent : Palette.muted).monospacedDigit()
+                        Text(config.count(species) == 0 && tally.count == 0 ? "Not in your tank. Add some in Residents." : Tackle.hint(species))
+                            .font(.system(size: 9)).foregroundStyle(Palette.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    }.padding(12).background(Palette.card, in: RoundedRectangle(cornerRadius: 11)).overlay(RoundedRectangle(cornerRadius: 11).stroke(Palette.border))
+                }
+            }
+            Text("TACKLE BOX").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(Palette.muted).padding(.top, 4)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(HookKind.allCases) { hook in tackleRow(hook.title, hook.detail, icon: "smallcircle.filled.circle") }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Offering.allCases) { offering in tackleRow(offering.title + (offering.isLure ? " · lure" : ""), offering.detail, icon: offering.symbol) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(18).background(Palette.card, in: RoundedRectangle(cornerRadius: 13)).overlay(RoundedRectangle(cornerRadius: 13).stroke(Palette.border))
+            Text("Every fish is released unharmed and stays a little hook-shy afterwards. Shrimp and crabs can't be hooked, but they will steal bait from the bottom.")
+                .font(.system(size: 11)).foregroundStyle(Palette.muted)
+        }
+    }
+
+    private func tackleRow(_ title: String, _ detail: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).frame(width: 18).foregroundStyle(Palette.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Text(detail).font(.system(size: 10)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var motionPanel: some View {

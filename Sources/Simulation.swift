@@ -99,7 +99,8 @@ struct AquariumSimulation {
 
     // MARK: State
 
-    private(set) var fish: [FishState] = []
+    // Settable from the fishing extension, which hooks, lands, and releases individual fish.
+    var fish: [FishState] = []
     var food: [FoodPellet] = []
     var pendingFood: [FoodPellet] = []
     private(set) var bubbleField: BubbleField
@@ -115,8 +116,12 @@ struct AquariumSimulation {
     var nextFoodID = 0
     private var bubbleRegion: SwimRegion?
     var lastDropX: Double?
-    private var theme: AquariumTheme?
+    private(set) var theme: AquariumTheme?
     var neighbors: [Neighbor] = []
+    /// The angler's tackle, present only in a fishing window's aquarium.
+    var rig: FishingRig?
+    /// Fish busy with the rig this step; a crowd at the bait makes fish bolder but also caps interest.
+    var rigCrowd = 0
 
     struct Neighbor {
         var id: Int, species: FishSpecies
@@ -178,7 +183,7 @@ struct AquariumSimulation {
     private func swimmingRegion(for fish: FishState, theme: AquariumTheme) -> SwimRegion {
         var r = Self.region(for: fish.species, theme: theme)
         // Hungry swimmers may leave their usual band to reach food near the surface or sand.
-        if fish.feeding != nil && !fish.species.isBottomDweller {
+        if fish.isEngaged && !fish.species.isBottomDweller {
             r.bottom = min(r.bottom, 0.20)
             r.top = max(r.top, 0.85)
         }
@@ -198,6 +203,7 @@ struct AquariumSimulation {
             food.removeAll(); pendingFood.removeAll(); lastDropX = nil
             bubbleRegion = nil
             theme = configuration.theme
+            if rig != nil { resetRig() }
             for i in fish.indices {
                 fish[i].feeding = nil
                 // A fresh stream, distinct from the one the shrimp was born with.
@@ -286,9 +292,10 @@ struct AquariumSimulation {
         guard configuration.swimmingSpeed > 0 else { return }
         let movement = dt * configuration.swimmingSpeed
         advanceFood(dt)
+        if rig != nil { advanceRig(dt: dt) }
         neighbors = fish.map { Neighbor(id: $0.id, species: $0.species, x: $0.x, y: $0.y, vx: $0.vx, vy: $0.vy,
                                         size: $0.species.bodySize * $0.depth, depth: $0.depth,
-                                        resting: $0.species == .loach && $0.burst.regime == .rest && $0.feeding == nil,
+                                        resting: $0.species == .loach && $0.burst.regime == .rest && !$0.isEngaged,
                                         settingOff: $0.species == .loach && $0.burst.justSetOff,
                                         dartingOff: $0.species == .loach && $0.burst.justSetOff && $0.burst.pace > 2,
                                         restYaw: $0.burst.restYaw, restBend: $0.burst.restBend) }
@@ -310,27 +317,32 @@ struct AquariumSimulation {
             }
             fish[i] = f
         }
+        if rig != nil { finishRigStep() }
     }
 
     private mutating func advance(_ f: inout FishState, dt: Double, movement: Double, theme: AquariumTheme, claims: [Int: Int]) {
         let home = Self.region(for: f.species, theme: theme).intersecting(visibleRegion)
+        // A hooked, landed, carried, or falling fish moves only as the line and water allow.
+        if (f.angling != nil || f.wariness > 0 || !(rig?.disturbances.isEmpty ?? true)) && anglingOverride(&f, dt: dt, movement: movement, home: home) { return }
         f.feedingCooldown = max(0, f.feedingCooldown - dt)
         f.moodRemaining -= movement
         f.appetite = min(1, f.appetite + movement * 0.025)
         chooseMood(&f)
-        if f.feeding == nil {
+        if !f.isEngaged {
             f.navigation.advance(delta: movement, x: f.x, y: f.y, region: home, resting: f.mood == .hover)
             noticeFood(&f, home: home, claims: claims)
+            if rig != nil && !f.isEngaged { noticeRig(&f, dt: dt, home: home, theme: theme) }
         }
         var goal = steeringGoal(&f, dt: dt, home: home, theme: theme)
-        if f.species == .loach && f.feeding == nil { chooseRestSpot(&f, goal: &goal, home: home, theme: theme) }
+        if f.angling != nil { anglingGoal(&f, goal: &goal, dt: dt, home: home) }
+        if f.species == .loach && !f.isEngaged { chooseRestSpot(&f, goal: &goal, home: home, theme: theme) }
         let previousBouts = f.crabGait.bouts, wasStepping = f.shrimpBehavior.stepping
         if f.species == .shrimp {
             steerShrimp(&f, goal: &goal, movement: movement, home: home, theme: theme)
             // Standing to graze, its claws pick at the surface about three and a half times a
             // second at the default swimming speed.
             let b = f.shrimpBehavior
-            let picking = (b.phase == .grazing && !b.stepping && !b.isEscaping) || f.feeding != nil
+            let picking = (b.phase == .grazing && !b.stepping && !b.isEscaping) || f.isEngaged
             // Each shrimp picks to its own rhythm, a little faster or slower than the next.
             let pickRate = 6 + 2 * (Double(f.id) * 0.618).truncatingRemainder(dividingBy: 1)
             f.shrimpBehavior.pickPhase = (f.shrimpBehavior.pickPhase + movement * 2 * .pi * pickRate).truncatingRemainder(dividingBy: 2 * .pi)
@@ -345,7 +357,7 @@ struct AquariumSimulation {
             // A loach that needs to turn around sets off and swims round rather than spinning in
             // place, and keeps swimming until the turn is done.
             let turnLeft = abs(Self.angleDifference(f.facingRight ? 0 : .pi, f.yaw))
-            if f.feeding == nil {
+            if !f.isEngaged {
                 if !f.burst.moving && turnLeft > 1 { f.burst.startBurst() }
                 // A turn-around swims back into the lane it came from; only a dart straight
                 // ahead is checked against the neighbours in that lane.
@@ -363,7 +375,7 @@ struct AquariumSimulation {
                     keepDartLaneClear(&f, home: home, movement: movement)
                 }
                 // A dart close by often sets it darting too.
-                if f.burst.regime == .forage && f.feeding == nil,
+                if f.burst.regime == .forage && !f.isEngaged,
                    neighbors.contains(where: { $0.dartingOff && $0.id != f.id && hypot($0.x - f.x, $0.y - f.y) < length * 2 }),
                    f.dice.chance(0.4) {
                     f.burst.dartAway()
@@ -374,7 +386,7 @@ struct AquariumSimulation {
             // Foraging, the head stays down in the sand, even while it slithers slowly on; resting,
             // the chin just lies on the sand; roaming or darting, the head is up.
             var target: Double
-            if f.feeding != nil { target = 0 }
+            if f.isEngaged { target = 0 }
             else if f.burst.regime == .rest { target = 0.35 }
             else if !f.burst.moving { target = 1 }
             else if f.burst.regime != .roam && f.burst.pace < 2 { target = 0.6 }
@@ -382,7 +394,7 @@ struct AquariumSimulation {
             // Once raised or lowered, the head holds a moment rather than flicking up and down.
             f.burst.headHold -= movement
             if target != f.burst.headTarget {
-                if f.burst.headHold <= 0 || f.feeding != nil || f.burst.pace > 2 { f.burst.headTarget = target; f.burst.headHold = 0.8 } else { target = f.burst.headTarget }
+                if f.burst.headHold <= 0 || f.isEngaged || f.burst.pace > 2 { f.burst.headTarget = target; f.burst.headHold = 0.8 } else { target = f.burst.headTarget }
             }
             f.burst.siftEnvelope += (target - f.burst.siftEnvelope) * (1 - exp(-dt * (target > f.burst.siftEnvelope ? 4 : 25)))
         }
@@ -396,11 +408,11 @@ struct AquariumSimulation {
                 if blocked { f.crabGait.bumped() }
             }
             // Away from food, the gait alone decides where a crab walks.
-            if f.feeding == nil { goal.x = f.x; goal.y = f.y }
+            if !f.isEngaged { goal.x = f.x; goal.y = f.y }
         }
         let desiredActivity = activityTarget(for: f)
         // Shrimp legs and loach wriggles start and stop quickly; other fish ease between moods.
-        let activityRate = f.feeding != nil ? 3.5 : (f.species == .shrimp ? 12.0 : (f.species == .loach ? 10.0 : 3.5))
+        let activityRate = f.isEngaged ? 3.5 : (f.species == .shrimp ? 12.0 : (f.species == .loach ? 10.0 : 3.5))
         f.activity += (desiredActivity - f.activity) * (1 - exp(-movement * activityRate))
         let (dx, dy) = steeringVector(for: f, towards: goal)
         let startX = f.x, startY = f.y
@@ -410,6 +422,7 @@ struct AquariumSimulation {
         if f.species == .shrimp && !f.shrimpBehavior.isEscaping { stepShrimpLegs(&f, dx: f.x - startX, dy: f.y - startY) }
         if f.species == .crab { stepCrabLegs(&f, dx: f.x - startX, dy: f.y - startY, dt: dt, movement: movement) }
         eatIfReached(&f, targetFood: goal.targetFood)
+        if let holder = rig?.holderID, holder == f.id { carryRig(f) }
         stirSand(f, previousBouts: previousBouts, wasStepping: wasStepping, movement: movement)
     }
 
@@ -456,8 +469,8 @@ struct AquariumSimulation {
         switch f.species {
         case .loach:
             // A foraging loach pauses to nose into the sand, throwing up a puff each time.
-            let sifting = f.feeding == nil && f.mood == .forage && f.forwardSpeed < f.species.cruiseSpeed * 0.3 && f.burst.regime != .rest
-            let crawling = f.feeding == nil && f.burst.moving && f.burst.pace < 0.45 && f.burst.regime == .forage
+            let sifting = !f.isEngaged && f.mood == .forage && f.forwardSpeed < f.species.cruiseSpeed * 0.3 && f.burst.regime != .rest
+            let crawling = !f.isEngaged && f.burst.moving && f.burst.pace < 0.45 && f.burst.regime == .forage
             if (sifting && sand.chance(movement * 0.5)) || (crawling && sand.chance(movement * 0.6)) {
                 let snout = f.x + cos(f.yaw) * f.species.bodyLength * 0.45
                 sand.puff(x: snout, floor: floor, depth: f.depth, strength: f.burst.moving ? 0.35 : 0.6)
@@ -568,8 +581,8 @@ struct AquariumSimulation {
             _ = f.shrimpBehavior.startle(threatDirection: threat.x >= f.x ? 1 : -1, facingRight: cos(f.yaw) >= 0, room: (f.x - home.left, home.right - f.x))
         }
         f.shrimpBehavior.advance(delta: movement, x: f.x, y: f.y, facingRight: cos(f.yaw) >= 0, region: home,
-            refuges: Self.shrimpRefuges(theme: theme), feeding: f.feeding != nil, threatened: threat != nil)
-        guard f.feeding == nil else { return }
+            refuges: Self.shrimpRefuges(theme: theme), feeding: f.isEngaged, threatened: threat != nil)
+        guard !f.isEngaged else { return }
         switch f.shrimpBehavior.phase {
         case .grazing: goal.y = min(goal.y, ShrimpBehavior.bedTop(of: home))
         case .seekingCover:
@@ -624,10 +637,11 @@ struct AquariumSimulation {
 
     /// How energetically a fish swims, relative to its cruise speed.
     private func activityTarget(for f: FishState) -> Double {
-        if f.species == .shrimp && f.feeding == nil { return f.shrimpBehavior.activity }
+        if let angling = f.angling { return anglingActivity(f, angling) }
+        if f.species == .shrimp && !f.isEngaged { return f.shrimpBehavior.activity }
         if f.feeding?.phase == .nibbling { return 0.18 }
         if f.feeding?.phase == .leaving { return 0.7 }
-        if f.species == .loach && f.feeding == nil && f.mood != .hover {
+        if f.species == .loach && !f.isEngaged && f.mood != .hover {
             // Wriggle forward in a burst, then stop dead to sift before the next one.
             // A dart is strongest at the start and eases off, rather than cruising at one speed.
             return f.burst.moving ? 8 * f.burst.pace * (0.55 + 0.45 * exp(-f.burst.elapsed / 0.45)) : 0
@@ -652,7 +666,7 @@ struct AquariumSimulation {
             if reach > 0.025 { dx *= 0.025 / reach; dy *= 0.025 / reach }
         }
         var shoalX = 0.0, shoalY = 0.0, shoalVX = 0.0, shoalVY = 0.0, shoalCount = 0.0
-        let schooling = f.species.isSchooling && f.feeding == nil
+        let schooling = f.species.isSchooling && !f.isEngaged
         for other in neighbors where other.id != f.id {
             let sx = f.x - other.x, sy = (f.y - other.y) * Self.verticalWeight
             let squaredDistance = sx * sx + sy * sy
@@ -679,7 +693,7 @@ struct AquariumSimulation {
                     // While feeding they crowd in, but never lie right on top of one another.
                     let feedingPush = Self.crabAndLoach(f.species, other.species) ? (f.species == other.species ? 0.12 : 0.2)
                         : (f.species == .loach && other.species == .loach ? 0.06 : (gap < 0.6 ? 0.08 : 0.025))
-                    let force = (1 - gap) * (f.feeding == nil ? 0.3 : feedingPush)
+                    let force = (1 - gap) * (!f.isEngaged ? 0.3 : feedingPush)
                     let side: Double = sx != 0 ? (sx > 0 ? 1 : -1) : (f.id < other.id ? -1 : 1)
                     dx += side * force
                     if gap > 1e-6 { dy += sy / (gap * reachY) * force * 0.15 }
@@ -689,7 +703,7 @@ struct AquariumSimulation {
             let spacing = (f.species.bodySize * f.depth + other.size) / 3200 * 0.62
             if squaredDistance > 1e-10 && squaredDistance < spacing * spacing {
                 let distance = sqrt(squaredDistance)
-                let force = (1 - distance / spacing) * (f.feeding == nil ? 0.11 : 0.035)
+                let force = (1 - distance / spacing) * (!f.isEngaged ? 0.11 : 0.035)
                 dx += sx / distance * force
                 dy += sy / distance * force
             }
@@ -704,12 +718,12 @@ struct AquariumSimulation {
 
     private func swim(_ f: inout FishState, dx: Double, dy: Double, goal: SteeringGoal, movement: Double) {
         let distance = max(0.001, hypot(dx, dy))
-        let pace = (f.feeding == nil ? f.navigation.speedFactor : 1) * f.personality.boldness
+        let pace = (!f.isEngaged ? f.navigation.speedFactor : 1) * f.personality.boldness
         // A wriggling loach keeps its pace however close its next spot on the bed is.
-        let throttle = f.species == .loach && f.feeding == nil && f.burst.moving ? 1 : min(1, distance / 0.025)
+        let throttle = f.species == .loach && !f.isEngaged && f.burst.moving ? 1 : min(1, distance / 0.025)
         let speed = f.species.cruiseSpeed * f.activity * pace * throttle
         var desiredVX = dx / distance * speed, desiredVY = dy / distance * speed
-        if f.species == .loach && f.feeding == nil && f.burst.moving {
+        if f.species == .loach && !f.isEngaged && f.burst.moving {
             // Each dart veers a little, so the path over the sand arcs rather than running on rails.
             if f.burst.sidestepping {
                 // A move to another lane is a forward swim turned well toward it, never a slide sideways.
@@ -722,8 +736,9 @@ struct AquariumSimulation {
         }
         let previousSpeed = hypot(f.vx, f.vy)
         let previousYaw = f.yaw, previousYawVelocity = f.yawVelocity
-        var responseRate = goal.targetFood == nil ? 1.8 : 3.2
-        if f.species == .crab && f.feeding == nil {
+        var responseRate = goal.targetFood == nil && !(f.angling?.phase.isFocused ?? false) ? 1.8 : 3.2
+        if f.angling?.phase == .fleeing { responseRate = 6 }
+        if f.species == .crab && !f.isEngaged {
             let gait = f.crabGait.velocityFactor
             // The body surges a little with each step rather than gliding at an even speed.
             let surge = 1 + 0.15 * sin(f.finPhase * 2)
@@ -731,9 +746,9 @@ struct AquariumSimulation {
             desiredVY += gait.y * f.species.cruiseSpeed * f.personality.boldness * surge
             // Crab legs start and stop a burst almost at once.
             responseRate = 25
-        } else if f.species == .shrimp && f.feeding == nil {
+        } else if f.species == .shrimp && !f.isEngaged {
             responseRate = 20
-        } else if f.species == .loach && f.feeding == nil {
+        } else if f.species == .loach && !f.isEngaged {
             // A loach stops dead to sift rather than coasting.
             responseRate = 14
         }
@@ -757,18 +772,18 @@ struct AquariumSimulation {
         }
         let actualSpeed = hypot(f.vx, f.vy)
         // A loach coasting out of a dart holds its body straight; the wriggle is only for driving.
-        let coasting = f.species == .loach && f.feeding == nil && !f.burst.moving
+        let coasting = f.species == .loach && !f.isEngaged && !f.burst.moving
         f.stroke.advance(delta: movement, species: f.species, speed: actualSpeed / f.species.cruiseSpeed * (coasting ? 0.3 : 1),
             acceleration: (actualSpeed - previousSpeed) / (movement * f.species.cruiseSpeed),
             turnRate: Self.angleDifference(f.yaw, previousYaw) / movement,
             turnAcceleration: (f.yawVelocity - previousYawVelocity) / movement,
-            hovering: f.isHovering, restingBend: f.species == .loach && f.feeding == nil && !f.burst.moving ? f.burst.restBend : 0)
+            hovering: f.isHovering, restingBend: f.species == .loach && !f.isEngaged && !f.burst.moving ? f.burst.restBend : 0)
         if f.species == .crab {
             // Crab legs step in proportion to the distance walked (see `stepCrabLegs`).
         } else if f.species == .shrimp {
             // About one and a half steps a second while walking; a slow idle between steps.
             // Legs step with the distance walked (see `stepShrimpLegs`); a feeding shrimp picks.
-            if f.feeding != nil { f.finPhase += movement * Self.shrimpStepRate * 0.3 }
+            if f.isEngaged { f.finPhase += movement * Self.shrimpStepRate * 0.3 }
         } else if f.species == .loach {
             // Anguilliform swimming: the body wave travels back a little faster than the fish moves
             // forward, about one and a half waves per body length, plus a slow ripple at rest.
@@ -824,9 +839,9 @@ struct AquariumSimulation {
     private func glide(_ f: inout FishState, desiredVX: Double, desiredVY: Double, response: Double, movement: Double) {
         chooseFacing(&f, desiredVX: desiredVX, movement: movement)
         // A resting loach lies at a slight angle of its own rather than parallel to its neighbours.
-        let restingLoach = f.species == .loach && f.feeding == nil && !f.burst.moving
+        let restingLoach = f.species == .loach && !f.isEngaged && !f.burst.moving
         // Stepping across to another lane, a loach angles its body toward it and crawls diagonally.
-        let acrossYaw = f.species == .loach && f.feeding == nil && f.burst.sidestepping
+        let acrossYaw = f.species == .loach && !f.isEngaged && f.burst.sidestepping
             ? (f.burst.bearing > 0 ? 0.9 : -0.9) * (f.facingRight ? 1 : -1) : 0
         let targetYaw = (f.facingRight ? 0 : Double.pi) + (f.isChasingFood ? 0 : f.navigation.viewAngle) + (restingLoach ? f.burst.restYaw : 0) + acrossYaw
         var turnLimit = (f.isChasingFood ? Self.feedingTurnLimit : f.navigation.turnLimit) * f.species.turnAgility
@@ -841,7 +856,7 @@ struct AquariumSimulation {
             let radius = f.species.turnRadius * f.species.bodyLength
             turnLimit = min(turnLimit, max(Self.stationaryTurnRate, f.forwardSpeed / radius))
             // A bursting loach whips round in a tight C, as eels do.
-            if f.species == .loach && f.feeding == nil && f.burst.moving { turnLimit *= 1.8 }
+            if f.species == .loach && !f.isEngaged && f.burst.moving { turnLimit *= 1.8 }
         }
         if (f.species == .loach || f.species == .shrimp) && abs(cos(f.yaw)) < 0.3 {
             // A side-on photograph cannot show these from the front, so they swing through that
@@ -860,14 +875,14 @@ struct AquariumSimulation {
         let glide = max(f.isChasingFood ? Self.feedingGlide : Self.wanderingGlide, alignment)
         let turning = min(1, abs(f.yawVelocity) / FishNavigation.turnLimits.upperBound)
         var forwardTarget = abs(desiredVX) * glide * (1 - 0.3 * turning)
-        let bursting = f.species == .loach && f.feeding == nil && f.burst.moving
+        let bursting = f.species == .loach && !f.isEngaged && f.burst.moving
         if bursting {
             // A wriggling loach drives forward at the burst's full pace, and keeps swimming through a turn.
             let drive = hypot(desiredVX, desiredVY) * max(0.5, alignment)
             forwardTarget = min(max(forwardTarget, drive), f.species.cruiseSpeed * 20)
         }
         let turningAround = abs(cos(f.yaw)) < 0.5 || abs(Self.angleDifference(targetYaw, f.yaw)) > 1
-        let sifting = f.species == .loach && f.feeding == nil && !f.burst.moving
+        let sifting = f.species == .loach && !f.isEngaged && !f.burst.moving
         if f.species == .shrimp && turningAround {
             // Keep walking through the turn rather than spinning on the spot.
             forwardTarget = max(forwardTarget, f.species.cruiseSpeed * 0.3)
@@ -905,12 +920,12 @@ struct AquariumSimulation {
         f.vy = vy
         if f.species == .shrimp, !f.shrimpBehavior.isEscaping, let theme,
            f.y > Self.region(for: .shrimp, theme: theme).top
-            || (f.shrimpBehavior.phase != .drifting && !f.shrimpBehavior.holdsPosition && f.feeding == nil
+            || (f.shrimpBehavior.phase != .drifting && !f.shrimpBehavior.holdsPosition && !f.isEngaged
                 && f.y > Self.shrimpFloor(f, theme: theme) + 0.004) {
             // After an escape the shrimp sinks back down to its usual band.
             f.vy = min(f.vy, -TankScale.height(cm: 1.5))
         }
-        if f.species == .shrimp && f.feeding == nil && f.shrimpBehavior.holdsPosition {
+        if f.species == .shrimp && !f.isEngaged && f.shrimpBehavior.holdsPosition {
             // Hidden shrimp stay put; emerging ones ease out of the refuge.
             let damping = f.shrimpBehavior.phase == .hidden ? 0 : exp(-movement * 12)
             f.forwardSpeed *= damping
@@ -949,12 +964,12 @@ struct AquariumSimulation {
         // While nibbling, the goal is the fish's own position; spacing nudges must not spin it.
         let nibbling = f.feeding?.phase == .nibbling
         // A shrimp turns round only while it is stepping, walking round a small arc.
-        let shrimpStanding = f.species == .shrimp && !f.shrimpBehavior.stepping && !f.shrimpBehavior.isEscaping && f.feeding == nil
+        let shrimpStanding = f.species == .shrimp && !f.shrimpBehavior.stepping && !f.shrimpBehavior.isEscaping && !f.isEngaged
         // A standing shrimp keeps its wish to turn round for its next step, rather than forgetting it.
         if shrimpStanding && opposing && !midTurn { return }
         // A loach lying at rest does not turn round where it lies.
         // Nor does a darting loach turn straight round mid-dart.
-        let loachLying = f.species == .loach && f.feeding == nil
+        let loachLying = f.species == .loach && !f.isEngaged
             && ((f.burst.regime == .rest && f.burst.restSpot == nil) || (f.burst.moving && f.burst.pace > 2))
         guard opposing && !midTurn && !nibbling && !shrimpStanding && !loachLying else { f.reversalUrge = 0; return }
         f.reversalUrge += movement

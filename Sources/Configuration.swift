@@ -288,6 +288,7 @@ private func bounded(_ value: Double, _ range: ClosedRange<Double>, fallback: Do
 
 @MainActor final class AquariumStore: ObservableObject {
     private static let storageKey = "aquarium.configuration.v1"
+    private static let anglingKey = "aquarium.angling.v1"
     private static let feedingCooldown: TimeInterval = 3
 
     @Published var configuration: AquariumConfiguration {
@@ -296,6 +297,14 @@ private func bounded(_ value: Double, _ range: ClosedRange<Double>, fallback: Do
         }
     }
     @Published var message: String? = nil
+    /// Chosen tackle and the lifetime catch log, kept apart from the aquarium settings so a
+    /// catch never re-applies the scene.
+    @Published var angling: AnglingLog {
+        didSet {
+            if angling != oldValue, let data = try? JSONEncoder().encode(angling) { defaults?.set(data, forKey: Self.anglingKey) }
+        }
+    }
+    let fishingRequests = PassthroughSubject<Void, Never>()
     @Published var feedingShortcutAvailable = false
     let feedRequests = PassthroughSubject<Void, Never>()
     private var lastFeed = -Double.infinity
@@ -312,7 +321,14 @@ private func bounded(_ value: Double, _ range: ClosedRange<Double>, fallback: Do
            let stored = try? JSONDecoder().decode(AquariumConfiguration.self, from: data) { initial = stored }
         initial.sanitize()
         configuration = initial
+        if let data = defaults?.data(forKey: Self.anglingKey), let stored = try? JSONDecoder().decode(AnglingLog.self, from: data) {
+            angling = stored
+        } else {
+            angling = AnglingLog()
+        }
     }
+
+    func requestFishing() { fishingRequests.send() }
 
     func requestFeed() {
         guard canFeed else { return }

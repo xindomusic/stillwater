@@ -15,6 +15,8 @@ model_sources=(
   Sources/Simulation.swift
   Sources/SimulationFeeding.swift
   Sources/SimulationBed.swift
+  Sources/Fishing.swift
+  Sources/SimulationFishing.swift
   Sources/WallpaperStills.swift
 )
 
@@ -28,7 +30,10 @@ rendering_sources=(
   Sources/Simulation.swift
   Sources/SimulationFeeding.swift
   Sources/SimulationBed.swift
+  Sources/Fishing.swift
+  Sources/SimulationFishing.swift
   Sources/Artwork.swift
+  Sources/FishingRendering.swift
   Sources/FishRendering.swift
   Sources/BubbleRendering.swift
   Sources/WaterRendering.swift

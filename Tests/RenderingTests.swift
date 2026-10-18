@@ -442,6 +442,40 @@ import UniformTypeIdentifiers
             }
         }
         print("PASS: snapshots preserve rendered lighting in both directions of manual and system fades")
+        // Fishing: a cast rig draws its float, line, and bait where it was aimed, and taking the
+        // rod out of the water removes every trace of it.
+        do {
+            var config = AquariumConfiguration()
+            config.lighting = .day
+            config.counts = Dictionary(uniqueKeysWithValues: FishSpecies.allCases.map { ($0.rawValue, 0) })
+            let surface = AquariumSurface(frame: CGRect(x: 0, y: 0, width: 640, height: 360), configuration: config)
+            surface.isPaused = true
+            let scene = surface.aquarium
+            scene.advanceForReview(seconds: 0.5)
+            let empty = Self.pixels(surface.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 320)
+            scene.startFishing(hook: .jHook, offering: .bloodworm)
+            require(scene.cast(x: 0.5, y: 0.5), "A fresh rig must cast")
+            scene.advanceForReview(seconds: 15)
+            require(scene.rig?.phase == .fishing, "The bait must settle under its float")
+            let fishing = Self.pixels(surface.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 320)
+            // Count changed pixels in the column above the bait, where the line and float are drawn.
+            var changed = 0
+            for y in 0..<320 { for x in 150..<170 {
+                let i = (y * 320 + x) * 4
+                if abs(Int(empty[i]) - Int(fishing[i])) + abs(Int(empty[i + 1]) - Int(fishing[i + 1])) + abs(Int(empty[i + 2]) - Int(fishing[i + 2])) > 30 { changed += 1 }
+            } }
+            require(changed > 40, "The line, float, and bait must be visible above the aimed spot (\(changed) pixels)")
+            scene.stopFishing()
+            scene.advanceForReview(seconds: 0.1)
+            let after = Self.pixels(surface.texture(from: scene, crop: CGRect(origin: .zero, size: scene.size))!.cgImage(), side: 320)
+            var leftover = 0
+            for y in 0..<320 { for x in 150..<170 {
+                let i = (y * 320 + x) * 4
+                if abs(Int(fishing[i]) - Int(after[i])) > 30 { leftover += 1 }
+            } }
+            require(leftover > 20, "Stopping fishing must remove the tackle")
+            print("PASS: a cast rig draws its float, line, and bait where aimed, and leaves nothing behind")
+        }
         window.orderOut(nil)
         print("Rendered turn comparisons to \(output.path)")
     }

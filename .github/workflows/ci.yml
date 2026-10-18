@@ -13,6 +13,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test simulation and settings
         run: zsh tools/test.sh
+      - name: Fish with scripted anglers
+        run: zsh tools/fishing-transcript.sh 1
       - name: Render shader regression checks
         # Hosted macOS runners provide a paravirtual Metal device; SpriteKit renders offscreen.
         run: zsh tools/test-rendering.sh build/rendering-review

@@ -21,6 +21,8 @@ Stillwater’s bundled scenes and fish views were generated specifically for thi
 
 [Scene prompts](../Resources/ASSET_PROMPTS.md) and [original fish prompts](../Resources/Fish/TURNTABLE_PROMPTS.md), plus the [six new profile prompts](../Resources/Fish/PROFILE_PROMPTS.md) are retained for provenance. The continuous turn renderer uses a photographic profile from each atlas as its body and fin material. The six new residents use standalone transparent profiles, generated with the built-in image generation tool and saved unchanged in `Resources/Fish/`. They are downsampled only when decoded for rendering. Pose rectangles are defined in `Sources/Artwork.swift`; generated atlas columns are not uniformly spaced.
 
+Fishing tackle (hooks, float, split shot, baits, lures, line, and splash rings) is drawn in code at launch by `FishingArt`; it uses no bundled images and no generated artwork.
+
 Documentation images come from the app’s own renderer and settings. They do not include a user’s desktop or other applications. The settings captures replace the Metal preview with a renderer snapshot, while preserving production controls and layout.
 
 The source, documentation, and bundled project artwork are distributed under the [MIT license](../LICENSE).

@@ -49,6 +49,7 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
         feedingTests(t)
         atmosphereTests(t)
         wallpaperStillTests(t)
+        fishingTests(t)
         if t.failures.isEmpty { print("All model tests passed") }
         else { t.failures.forEach { fputs("FAIL: \($0)\n", stderr) }; exit(1) }
     }
@@ -1021,6 +1022,235 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             t.check(summary.count == 14, "Summary counts every saved PNG still (got \(summary.count))")
             t.check(summary.bytes == Int64(12 * oldImage.count + 2 * image.count), "Summary totals PNG bytes only (got \(summary.bytes))")
             t.check(WallpaperStills.summary(in: folder.appendingPathComponent("missing")).count == 0, "A missing folder summarizes as empty")
+        }
+    }
+
+    // MARK: Fishing
+
+    /// A fishing simulation framed like a 16:9 display.
+    @MainActor static func pond(_ counts: [FishSpecies: Int], hook: HookKind, offering: Offering, seed: UInt64 = 7) -> (AquariumSimulation, AquariumConfiguration) {
+        var config = population(counts)
+        config.theme = .river
+        var sim = AquariumSimulation(seed: seed)
+        sim.visibleRegion = AquariumFraming(viewport: CGSize(width: 1600, height: 900), image: CGSize(width: 1935, height: 812)).visibleRegion
+        sim.synchronize(config)
+        run(&sim, frames: 60, config)
+        sim.startFishing(hook: hook, offering: offering)
+        return (sim, config)
+    }
+
+    enum FightStyle { case skilled, reelNonstop, neverReel }
+
+    /// Fishes like a person would and returns every event. `strikes`: lift a quarter second
+    /// after the float goes under.
+    @MainActor static func angle(_ sim: inout AquariumSimulation, _ config: AquariumConfiguration, seconds: Double, at spot: (Double, Double),
+                                 strikes: Bool = true, fight: FightStyle = .skilled, retrieve: Bool = false) -> [FishingEvent] {
+        var events: [FishingEvent] = []
+        var strikeAt: Double?
+        var t = 0.0
+        while t < seconds {
+            t += frame
+            guard let rig = sim.rig else { break }
+            switch rig.phase {
+            case .stowed: sim.cast(x: spot.0, y: spot.1)
+            case .sinking, .fishing:
+                if let at = strikeAt, t >= at { sim.strike(); strikeAt = nil }
+                sim.setReeling(retrieve && rig.soak > 1 && t.truncatingRemainder(dividingBy: 2.2) < 1.6)
+                if !rig.offering.isLure && (rig.baitLeft <= 0.04 || rig.soak > 45) { sim.reelIn() }
+            case .fighting:
+                switch fight {
+                case .skilled: sim.setReeling(!rig.running && rig.pressure < rig.hook.strength * 0.8)
+                case .reelNonstop: sim.setReeling(true)
+                case .neverReel: sim.setReeling(false)
+                }
+            default: sim.setReeling(false)
+            }
+            sim.step(delta: frame, configuration: config)
+            for event in sim.drainFishingEvents() {
+                events.append(event)
+                if case .take = event, strikes { strikeAt = t + 0.28 }
+            }
+        }
+        return events
+    }
+
+    static func count(_ events: [FishingEvent], _ match: (FishingEvent) -> Bool) -> Int { events.filter(match).count }
+
+    @MainActor static func fishingTests(_ t: TestRun) {
+        t.test("a cast lands where it is aimed; bait sinks to its depth, lures to the sand, a fly stays on top") {
+            for (offering, expectFloor) in [(Offering.bloodworm, false), (.softWorm, true), (.dryFly, false)] {
+                var (sim, config) = pond([:], hook: .jHook, offering: offering)
+                t.check(sim.cast(x: 0.4, y: 0.45), "A stowed rig can be cast")
+                t.check(!sim.cast(x: 0.6, y: 0.45), "The line is already out")
+                run(&sim, frames: 30 * 30, config)
+                guard let rig = sim.rig else { t.check(false, "Rig exists"); continue }
+                t.check(rig.phase == .fishing, "\(offering) settles (\(rig.phase))")
+                t.check(abs(rig.x - 0.4) < 0.01, "\(offering) lands at the aimed spot (\(rig.x))")
+                if offering == .dryFly { t.check(rig.y > rig.surfaceY - 0.01, "A dry fly floats on the film") }
+                else if expectFloor { t.check(rig.y < AquariumSimulation.sandHeight + 0.01, "A jig sinks to the sand (\(rig.y))") }
+                else { t.check(abs(rig.y - 0.45) < 0.005, "Bait hangs at the clicked depth under its float (\(rig.y))") }
+            }
+            // A bloodworm sinks at about 2 cm/s: from the surface to mid-water takes several seconds, not one.
+            var (sim, config) = pond([:], hook: .jHook, offering: .bloodworm)
+            sim.cast(x: 0.4, y: 0.3)
+            run(&sim, frames: 30 * 2, config)
+            t.check(sim.rig!.phase == .sinking, "Bait sinks gradually rather than snapping to depth")
+        }
+
+        t.test("small fish strip a big hook: lots of nibbles and stolen bait, no hookups") {
+            var (sim, config) = pond([.rasbora: 10, .danio: 8], hook: .circle, offering: .bloodworm)
+            let events = angle(&sim, config, seconds: 240, at: (0.45, 0.55))
+            let nibbles = count(events) { if case .nibble = $0 { return true }; return false }
+            let stolen = count(events) { if case .baitStolen = $0 { return true }; return false }
+            let hooked = count(events) { if case .hooked = $0 { return true }; return false }
+            t.check(nibbles > 15, "Small fish pick at the bait (\(nibbles) nibbles)")
+            t.check(stolen >= 2, "They strip the hook bare (\(stolen) baits stolen)")
+            t.check(hooked == 0, "A No. 6 circle hook does not fit a rasbora's or danio's mouth (\(hooked) hooked)")
+        }
+
+        t.test("a fine hook catches the same small fish; a timely strike usually sets the hook") {
+            var (sim, config) = pond([.rasbora: 10, .danio: 8], hook: .fine, offering: .bloodworm)
+            let events = angle(&sim, config, seconds: 300, at: (0.45, 0.55))
+            let takes = count(events) { if case .take = $0 { return true }; return false }
+            let hooked = count(events) { if case .hooked = $0 { return true }; return false }
+            let landed = count(events) { if case .landed = $0 { return true }; return false }
+            t.check(takes >= 3, "Fish take the bait (\(takes) takes)")
+            t.check(hooked >= takes / 2, "Striking a quarter second after the float goes under hooks most of them (\(hooked) of \(takes))")
+            t.check(landed >= 2, "Small fish are landed (\(landed))")
+        }
+
+        t.test("without a strike a J-hook rarely holds, but a circle hook sets itself in a koi") {
+            var (sim, config) = pond([.golden: 6], hook: .jHook, offering: .bloodworm)
+            let lazy = angle(&sim, config, seconds: 240, at: (0.45, 0.5), strikes: false)
+            t.check(count(lazy) { if case .hooked = $0 { return true }; return false } == 0, "A J-hook needs a strike")
+            t.check(count(lazy) { if case .spat = $0 { return true }; return false } >= 2, "Unstruck, fish spit the bait")
+            var circle = 0
+            for seed in [3, 7, 11] as [UInt64] {
+                var (koi, koiConfig) = pond([.koi: 3], hook: .circle, offering: .bread, seed: seed)
+                let events = angle(&koi, koiConfig, seconds: 300, at: (0.45, 0.5), strikes: false)
+                circle += count(events) { if case .hooked = $0 { return true }; return false }
+            }
+            t.check(circle >= 2, "Circle hooks set as the fish turns away (\(circle) hooked without a strike)")
+        }
+
+        t.test("fights: reeling against runs breaks off a koi, a slack line throws the hook, patience lands it") {
+            var outcomes: [FightStyle: (landed: Int, snapped: Int, thrown: Int)] = [:]
+            for style in [FightStyle.skilled, .reelNonstop, .neverReel] {
+                var tally = (landed: 0, snapped: 0, thrown: 0)
+                for seed in [3, 5, 7, 9] as [UInt64] {
+                    var (sim, config) = pond([.koi: 3], hook: .jHook, offering: .bread, seed: seed)
+                    let events = angle(&sim, config, seconds: 360, at: (0.45, 0.5), fight: style)
+                    tally.landed += count(events) { if case .landed = $0 { return true }; return false }
+                    tally.snapped += count(events) { if case .lineSnapped = $0 { return true }; return false }
+                    tally.thrown += count(events) { if case .threwHook = $0 { return true }; return false }
+                }
+                outcomes[style] = tally
+            }
+            let skilled = outcomes[.skilled]!, nonstop = outcomes[.reelNonstop]!, never = outcomes[.neverReel]!
+            t.check(skilled.landed >= 2, "Reeling between runs lands koi (\(skilled))")
+            t.check(nonstop.snapped > skilled.snapped && nonstop.snapped >= 1, "Reeling through every run breaks the line (\(nonstop) vs \(skilled))")
+            t.check(never.landed == 0 && never.thrown >= 1, "Never reeling lets them throw the hook (\(never))")
+        }
+
+        t.test("a fine hook opens out if you crank into a koi's run, but played on the drag it can land one") {
+            var straightened = 0, landed = 0
+            for seed in [3, 5, 7, 9] as [UInt64] {
+                var (rough, config) = pond([.koi: 3], hook: .fine, offering: .bread, seed: seed)
+                straightened += count(angle(&rough, config, seconds: 300, at: (0.45, 0.5), fight: .reelNonstop)) { if case .hookStraightened = $0 { return true }; return false }
+                var (gentle, gentleConfig) = pond([.koi: 3], hook: .fine, offering: .bread, seed: seed)
+                landed += count(angle(&gentle, gentleConfig, seconds: 600, at: (0.45, 0.5))) { if case .landed = $0 { return true }; return false }
+            }
+            t.check(straightened >= 1, "Fine wire opens out when cranked against a run (\(straightened))")
+            t.check(landed >= 1, "With patience the drag lands a koi even on a No. 18 (\(landed))")
+        }
+
+        t.test("a landed fish is measured, released unharmed, and stays hook-shy") {
+            var (sim, config) = pond([.golden: 5], hook: .jHook, offering: .bloodworm)
+            var landed: CatchRecord?
+            var t0 = 0.0
+            while landed == nil && t0 < 400 {
+                let events = angle(&sim, config, seconds: 1, at: (0.45, 0.5))
+                t0 += 1
+                for case .landed(let record) in events { landed = record }
+            }
+            guard let record = landed else { t.check(false, "A golden barb is landed within a few minutes"); return }
+            t.check(record.lengthCM > 5.5 && record.lengthCM < 8.5, "Its length is a golden barb's (\(record.lengthCM) cm)")
+            t.check(abs(record.weightGrams - Tackle.weightGrams(.golden, lengthCM: record.lengthCM)) < 0.1, "Weight follows length")
+            t.check(record.lengthCM == Tackle.lengthCM(.golden, id: record.fishID), "Each fish keeps its own size")
+            let landedFish = sim.fish.first { $0.id == record.fishID }
+            t.check(landedFish?.angling?.phase == .landed, "Out of the water while being admired")
+            run(&sim, frames: Int(FishingRig.landedDuration * 30) + 10, config)
+            let released = sim.fish.first { $0.id == record.fishID }
+            t.check(sim.fish.count == 5, "Catch and release keeps the population")
+            t.check(released?.angling?.phase == .released, "It is put back and swims off")
+            t.check((released?.wariness ?? 0) > 0.9, "It is hook-shy afterwards")
+            t.check(sim.rig?.phase == .stowed, "The rig is ready for the next cast")
+            run(&sim, frames: 30 * 60, config)
+            t.check((sim.fish.first { $0.id == record.fishID }?.wariness ?? 1) < 0.65, "Wariness fades over minutes")
+        }
+
+        t.test("a spinner draws fish only while it moves") {
+            var (still, config) = pond([.golden: 6, .betta: 2], hook: .jHook, offering: .spinner)
+            let lying = angle(&still, config, seconds: 120, at: (0.4, 0.5), retrieve: false)
+            var (moving, movingConfig) = pond([.golden: 6, .betta: 2], hook: .jHook, offering: .spinner)
+            let worked = angle(&moving, movingConfig, seconds: 120, at: (0.4, 0.5), retrieve: true)
+            let stillInterest = count(lying) { if case .following = $0 { return true }; return false }
+            let movingInterest = count(worked) { if case .following = $0 { return true }; return false }
+            t.check(movingInterest > stillInterest * 3 + 2, "Fish follow a working spinner (\(movingInterest)) far more than one lying still (\(stillInterest))")
+            t.check(count(worked) { if case .hooked = $0 { return true }; return false } >= 1, "A retrieved spinner gets hit")
+        }
+
+        t.test("shrimp and crabs steal bait off the bottom but are never hooked") {
+            var (sim, config) = pond([.shrimp: 6, .crab: 5], hook: .fine, offering: .bloodworm)
+            let events = angle(&sim, config, seconds: 300, at: (0.35, 0.09))
+            let pecks = count(events) { if case .nibble(let s) = $0 { return s.isInvertebrate }; return false }
+            t.check(pecks > 10, "They pick at a bait lying among them (\(pecks))")
+            t.check(count(events) { if case .baitStolen = $0 { return true }; return false } >= 1, "and strip it")
+            t.check(count(events) { if case .hooked = $0 { return true }; return false } == 0, "but are never hooked")
+            for f in sim.fish { t.check(f.y < 0.3, "Residents of the bed end up back on it") }
+        }
+
+        t.test("Still and zero speed freeze fishing; a rig that is not cast changes nothing") {
+            var (sim, config) = pond([.golden: 4], hook: .jHook, offering: .bloodworm)
+            sim.cast(x: 0.45, y: 0.5)
+            run(&sim, frames: 90, config)
+            let before = sim.rig!
+            var still = config; still.mode = .still
+            run(&sim, frames: 300, still)
+            t.check(sim.rig!.y == before.y && sim.rig!.phase == before.phase && sim.rig!.soak == before.soak, "Still freezes the rig")
+            var stopped = config; stopped.swimmingSpeed = 0
+            run(&sim, frames: 300, stopped)
+            t.check(sim.rig!.soak == before.soak, "Zero swimming speed freezes the rig")
+            // Taking the rod out but never casting must not change a single fish's choices.
+            var (a, aConfig) = pond([.rasbora: 8, .loach: 3, .shrimp: 3], hook: .jHook, offering: .bloodworm)
+            a.stopFishing()
+            var (b, _) = pond([.rasbora: 8, .loach: 3, .shrimp: 3], hook: .jHook, offering: .bloodworm)
+            run(&a, frames: 600, aConfig)
+            run(&b, frames: 600, aConfig)
+            t.check(zip(a.fish, b.fish).allSatisfy { $0.x == $1.x && $0.y == $1.y && $0.yaw == $1.yaw }, "An uncast rig leaves every fish as it was")
+            // A scene change takes the line out.
+            var (c, cConfig) = pond([.golden: 3], hook: .jHook, offering: .bloodworm)
+            c.cast(x: 0.4, y: 0.5)
+            run(&c, frames: 60, cConfig)
+            var moved = cConfig; moved.theme = .grove
+            c.synchronize(moved)
+            t.check(c.rig?.phase == .stowed && c.fish.allSatisfy { $0.angling == nil }, "A new scene stows the rig")
+        }
+
+        t.test("the catch log keeps counts, bests, and survives a round trip") {
+            var log = AnglingLog()
+            let small = CatchRecord(species: .koi, lengthCM: 38, weightGrams: 880, hook: .circle, offering: .bread, fishID: 1)
+            let big = CatchRecord(species: .koi, lengthCM: 44, weightGrams: 1360, hook: .jHook, offering: .pellet, fishID: 2)
+            t.check(!log.record(.landed(small)), "A first catch is not a personal best over nothing")
+            t.check(log.record(.landed(big)), "A bigger one is a personal best")
+            t.check(!log.record(.landed(small)), "A smaller one is not")
+            log.record(.cast); log.record(.baitStolen(.shrimp)); log.record(.lineSnapped(.koi))
+            t.check(log.tally(.koi).count == 3 && log.tally(.koi).bestCM == 44 && log.tally(.koi).bestOn == .pellet, "Tally keeps count and best")
+            t.check(log.landed == 3 && log.casts == 1 && log.baitsStolen == 1 && log.lost == 1 && log.speciesCaught == 1, "Totals add up")
+            let data = try JSONEncoder().encode(log)
+            let decoded = try JSONDecoder().decode(AnglingLog.self, from: data)
+            t.check(decoded == log, "The log round-trips")
+            t.check(Tackle.lengthCM(.rasbora, id: 4) == Tackle.lengthCM(.rasbora, id: 4), "Sizes are stable per individual")
         }
     }
 }

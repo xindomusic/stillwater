@@ -245,7 +245,7 @@ extension AquariumSimulation {
 
     /// Two loaches both lying at rest, which may lie close alongside each other.
     func bothResting(_ f: FishState, _ other: Neighbor) -> Bool {
-        f.species == .loach && other.resting && f.burst.regime == .rest && f.feeding == nil
+        f.species == .loach && other.resting && f.burst.regime == .rest && !f.isEngaged
     }
 
     /// A crab away from food holds its ground; a loach that meets it goes round it, and is not
@@ -254,12 +254,12 @@ extension AquariumSimulation {
     /// A crab away from food holds its ground; a loach that meets it goes round it, and is not
     /// the one to shove the crab along.
     func holdsGround(_ f: FishState, against other: Neighbor) -> Bool {
-        f.species == .crab && f.feeding == nil && other.species == .loach
+        f.species == .crab && !f.isEngaged && other.species == .loach
     }
 
     func nudgeApartOnBed(_ f: inout FishState, region: SwimRegion, movement: Double) {
         // A shrimp tucked into its refuge is not shouldered out of it; neighbours make the room.
-        if f.species == .shrimp && f.feeding == nil && f.shrimpBehavior.holdsPosition { return }
+        if f.species == .shrimp && !f.isEngaged && f.shrimpBehavior.holdsPosition { return }
         // Nor is one in the middle of a tail flip, which is off the sand altogether.
         if f.species == .shrimp && f.shrimpBehavior.isEscaping { return }
         var push = 0.0
