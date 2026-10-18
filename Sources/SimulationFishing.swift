@@ -62,7 +62,7 @@ extension AquariumSimulation {
         r.phase = .flying
         r.baitLeft = 1; r.soak = 0; r.speed = 0; r.sinceTwitch = 99
         r.floatX = r.castX; r.floatDip = 0; r.floatBob = 0
-        r.holderID = nil; r.pendingStrike = false; r.crumbs.removeAll()
+        r.holderID = nil; r.pendingStrike = false; r.crumbs.removeAll(); r.takeAge = 99
         r.emit(.cast)
         rig = r
         return true
@@ -145,6 +145,7 @@ extension AquariumSimulation {
         r.floatBob *= exp(-dt * 4)
         r.sinceTwitch += dt
         r.splashAge += dt
+        r.takeAge += dt
         advanceCrumbs(&r, dt: dt)
         let previousX = r.x, previousY = r.y
         switch r.phase {
@@ -176,8 +177,31 @@ extension AquariumSimulation {
         // The float slides under while a fish has the bait or is on; otherwise it rides the ripples.
         // A big fish drags a shotted float right under; a danio can barely dip it.
         var under: Double = r.phase == .fighting ? 0.75 : 0
-        if let holder = r.holderID, let f = fish.first(where: { $0.id == holder }) { under = min(1, 0.35 + 2 * Tackle.fightStrength(f.species)) }
-        r.floatDip += (under - r.floatDip) * (1 - exp(-dt * (under > r.floatDip ? 9 : 3)))
+        var rate = under > r.floatDip ? 9.0 : 3.0
+        if let holder = r.holderID, let f = fish.first(where: { $0.id == holder }) {
+            let full = min(1, 0.35 + 2 * Tackle.fightStrength(f.species))
+            let t = r.holdElapsed
+            switch r.biteStyle {
+            case .dips:
+                // Two sharp dips, each bouncing back a touch proud of the film, then it buries.
+                let beat = t.truncatingRemainder(dividingBy: FishingRig.dipBeat)
+                under = t < FishingRig.dipTime ? (beat < 0.1 ? 0.36 : -0.06) : full
+                rate = 30
+                if t < FishingRig.dipTime && beat < dt { r.floatBob = max(r.floatBob, 0.6) }
+            case .lift:
+                // The shot is lifted off the bottom: the float rises and keels over, then goes.
+                under = t < 0.9 ? -0.3 : full
+                rate = 10
+            case .sailAway:
+                // Off it goes after the fish, sinking as it runs, the bait always leading it.
+                under = full * min(1, 0.45 + t)
+                rate = 14
+                let ahead = abs(f.x - r.floatX) > 0.004 ? (f.x > r.floatX ? 1.0 : -1.0) : r.takeSide
+                let trail = f.x - ahead * 0.05
+                if t < 0.8 && (trail - r.floatX) * ahead > 0 { r.floatX += ahead * min(0.13 * dt, abs(trail - r.floatX)) }
+            }
+        }
+        r.floatDip += (under - r.floatDip) * (1 - exp(-dt * rate))
         resolveStrike(&r)
         rig = r
         rigCrowd = fish.reduce(0) { $0 + (($1.angling?.phase.isAtBait ?? false) ? 1 : 0) }
@@ -272,7 +296,9 @@ extension AquariumSimulation {
             let fit = Tackle.hookFit(f.species, r.hook)
             // Struck the instant the float twitches, the bait is pulled from its lips; a circle
             // hook wants no strike at all, only the fish turning away against a tight line.
-            let timing = r.holdElapsed < 0.12 ? 0.55 : 1.0
+            // Struck on the dips, before the float buries, the bait usually comes away too.
+            let early = r.biteStyle == .dips && r.offering.usesFloat && r.holdElapsed < FishingRig.dipTime
+            let timing = early ? 0.4 : (r.holdElapsed < 0.12 ? 0.55 : 1.0)
             r.holderID = nil
             if r.dice.chance(fit * timing * (r.hook.setsItself ? 0.35 : 1)) {
                 hook(&f, rig: &r)
@@ -546,6 +572,8 @@ extension AquariumSimulation {
         case .holding:
             guard r.holderID == f.id else { leave(&f, &a, from: r); break }
             goal.x = a.x; goal.y = a.y
+            // A rise: nose up into the film for a moment with the fly, then down and away.
+            if r.offering.floats && r.holdElapsed < 0.18 { goal.x = biteX; goal.y = biteY + 0.012 }
             rig?.holdElapsed += dt
             if let held = rig, held.holdElapsed >= held.holdLimit { endHold(&f, &a) }
         case .gripping:
@@ -642,14 +670,23 @@ extension AquariumSimulation {
         r.emit(.take(f.species))
         r.holderID = f.id
         r.holdElapsed = 0
+        r.takeAge = 0
+        r.takeX = r.offering.usesFloat ? r.floatX : r.x
+        r.takeSide = a.side < 0 ? -1 : 1
+        let onBottom = r.setDepthY < Self.sandHeight + 0.07
+        r.biteStyle = !r.offering.usesFloat ? .sailAway
+            : (f.species == .loach || (onBottom && r.dice.chance(0.5)) ? .lift : (Tackle.fightStrength(f.species) < 0.3 ? .dips : .sailAway))
         // A lure is mouthed a little more briefly than food, but always long enough to react.
         r.holdLimit = max(0.6, f.dice.value(Tackle.holdTime(f.species)) * (r.offering.isLure ? 0.85 : 1))
+        // The dips are the fish mouthing it; its hold only starts to run out once the float buries.
+        if r.biteStyle == .dips { r.holdLimit += FishingRig.dipTime }
         rig = r
         // It turns back the way it came with the bait, and a little down.
         a.phase = .holding
         a.age = 0
         a.x = f.x + a.side * 0.08
-        a.y = f.y - 0.02
+        // A fish that sipped a fly from the film turns back down steeply.
+        a.y = f.y - (r.offering.floats ? 0.06 : 0.02)
     }
 
     /// Mouthed long enough: it feels the hook and spits it, unless a circle hook catches in the
@@ -720,7 +757,10 @@ extension AquariumSimulation {
             return ((r.speed / max(0.001, f.species.cruiseSpeed * 0.5)) * (behind ? 2 : 1.1)).clamped(to: behind ? 2...4.5 : 0.4...2.8)
         case .nibbling: return a.backOff > 0 ? 0.35 : 0.9
         case .taking: return rig?.offering.isLure == true ? 2.6 : 1.4
-        case .holding: return 0.55
+        case .holding:
+            // After a rise the fish turns down with a flick of its tail.
+            guard let r = rig, r.offering.floats else { return 0.55 }
+            return r.holdElapsed < 0.18 ? 0.5 : 1.5
         case .fleeing: return 2.8
         case .refusing: return 0.7
         case .released: return 2.2
@@ -733,7 +773,8 @@ extension AquariumSimulation {
     mutating func carryRig(_ f: FishState) {
         let m = Self.mouth(of: f)
         rig?.x = m.x; rig?.y = m.y
-        if let floatX = rig?.floatX { rig?.floatX = floatX + (f.x - floatX) * 0.08 }
+        // A sail-away runs ahead of the fish for a moment before the line drags it back over it.
+        if let r = rig, !(r.biteStyle == .sailAway && r.holdElapsed < 0.6) { rig?.floatX = r.floatX + (f.x - r.floatX) * 0.08 }
     }
 
     // MARK: The fight

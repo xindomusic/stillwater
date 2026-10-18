@@ -1044,7 +1044,8 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
     /// Fishes like a person would and returns every event. `strikes`: lift a quarter second
     /// after the float goes under.
     @MainActor static func angle(_ sim: inout AquariumSimulation, _ config: AquariumConfiguration, seconds: Double, at spot: (Double, Double),
-                                 strikes: Bool = true, fight: FightStyle = .skilled, retrieve: Bool = false) -> [FishingEvent] {
+                                 strikes: Bool = true, fight: FightStyle = .skilled, retrieve: Bool = false,
+                                 strikeOnDips: Bool = false, styles: UnsafeMutablePointer<[BiteStyle]>? = nil) -> [FishingEvent] {
         var events: [FishingEvent] = []
         var strikeAt: Double?
         var t = 0.0
@@ -1068,7 +1069,12 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             sim.step(delta: frame, configuration: config)
             for event in sim.drainFishingEvents() {
                 events.append(event)
-                if case .take = event, strikes { strikeAt = t + 0.28 }
+                // Like an angler, wait out a small fish's dips and strike as the float buries.
+                if case .take = event, strikes {
+                    let dips = sim.rig.map { $0.biteStyle == .dips && $0.offering.usesFloat } ?? false
+                    if let style = sim.rig?.biteStyle { styles?.pointee.append(style) }
+                    strikeAt = strikeOnDips ? t + 0.18 : t + 0.28 + (dips ? FishingRig.dipTime : 0)
+                }
             }
         }
         return events
@@ -1106,6 +1112,28 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
             t.check(nibbles > 15, "Small fish pick at the bait (\(nibbles) nibbles)")
             t.check(stolen >= 2, "They strip the hook bare (\(stolen) baits stolen)")
             t.check(hooked == 0, "A No. 6 circle hook does not fit a rasbora's or danio's mouth (\(hooked) hooked)")
+        }
+
+        t.test("float bites have shapes: small fish dip it first, bottom takers lift it, bigger fish sail it away") {
+            var small: [BiteStyle] = [], bottom: [BiteStyle] = [], big: [BiteStyle] = []
+            var (a, ca) = pond([.rasbora: 10, .danio: 8], hook: .fine, offering: .bloodworm)
+            let waited = angle(&a, ca, seconds: 300, at: (0.45, 0.55), styles: &small)
+            var (b, cb) = pond([.loach: 6], hook: .fine, offering: .bloodworm)
+            _ = angle(&b, cb, seconds: 300, at: (0.4, 0.1), styles: &bottom)
+            var (c, cc) = pond([.golden: 4, .pearl: 3], hook: .jHook, offering: .bread)
+            _ = angle(&c, cc, seconds: 300, at: (0.45, 0.55), styles: &big)
+            t.check(!small.isEmpty && small.allSatisfy { $0 == .dips }, "Rasboras and danios dip the float (\(small))")
+            t.check(!bottom.isEmpty && bottom.allSatisfy { $0 == .lift }, "A loach lifts the float flat (\(bottom))")
+            t.check(!big.isEmpty && big.allSatisfy { $0 == .sailAway }, "Barbs and gouramis sail it away (\(big))")
+            // Striking on the dips usually pulls the bait away; waiting for the bury hooks them.
+            var (d, cd) = pond([.rasbora: 10, .danio: 8], hook: .fine, offering: .bloodworm)
+            let hasty = angle(&d, cd, seconds: 300, at: (0.45, 0.55), strikeOnDips: true)
+            let rate = { (events: [FishingEvent]) -> Double in
+                let takes = count(events) { if case .take = $0 { return true }; return false }
+                let hooked = count(events) { if case .hooked = $0 { return true }; return false }
+                return Double(hooked) / Double(max(1, takes))
+            }
+            t.check(rate(hasty) < rate(waited) * 0.75, "Striking on the dips hooks fewer (\(String(format: "%.2f", rate(hasty))) vs \(String(format: "%.2f", rate(waited))) waiting)")
         }
 
         t.test("a fine hook catches the same small fish; a timely strike usually sets the hook") {

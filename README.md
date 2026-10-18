@@ -8,7 +8,7 @@
     <img alt="macOS 14 or later, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-697586">
     <a href="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml"><img alt="Build and test" src="https://github.com/xindomusic/stillwater/actions/workflows/ci.yml/badge.svg"></a>
   </p>
-  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.0/Stillwater-2.0.0-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.0/Stillwater-2.0.0-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
+  <p><a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.1/Stillwater-2.0.1-macOS-arm64.dmg"><strong>Download for Mac · DMG</strong></a> &nbsp; · &nbsp; <a href="https://github.com/xindomusic/stillwater/releases/download/v2.0.1/Stillwater-2.0.1-macOS-arm64.zip">ZIP</a> &nbsp; · &nbsp; <a href="docs/INSTALL.md">Installation guide</a></p>
 </div>
 
 ![Riverlight: clear freshwater, planted river stones, and Asian freshwater fish](docs/images/riverlight.png)
@@ -108,7 +108,7 @@ An enlarged shader demonstration of hovering, articulated turns, and dashing. Ca
 
 **Requirements:** Apple Silicon Mac (M1 or later), macOS 14 or later. The published binary is arm64. Local rendering was tested on an M4 with macOS 27; see [validation](VALIDATION.md) for coverage and limits.
 
-**First launch:** v2.0.0 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
+**First launch:** v2.0.1 is ad-hoc signed and is **not Apple-notarized**. macOS may block the first launch. If you choose to trust this release, use **System Settings → Privacy & Security → Open Anyway** after attempting to open it. See the [installation guide](docs/INSTALL.md) and [Apple’s instructions](https://support.apple.com/guide/mac-help/mh40616/mac). SHA-256 checksums accompany the downloads.
 
 Closing settings leaves the aquarium running. **Quit Stillwater** from the fish menu to reveal your underlying wallpaper. To launch at login, add Stillwater through macOS Login Items.
 
@@ -126,7 +126,7 @@ The **Feed fish** button and menu command do the same thing. Feeding requires Li
 
 Choose **Go Fishing…** from the fish menu (or press ⌘G in Stillwater, or use **Fishing** in settings). A window opens onto your aquarium with a rod in hand; your desktop aquarium stays undisturbed.
 
-![Fishing: a golden barb has taken the bread and the float slides under](docs/images/fishing.png)
+![Fishing: a fish has taken the bloodworm and the float slides away under](docs/images/fishing.png)
 
 | Action | How |
 | --- | --- |

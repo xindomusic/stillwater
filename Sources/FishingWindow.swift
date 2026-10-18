@@ -21,6 +21,8 @@ struct CatchCard: Equatable {
     @Published var baitLeft = 1.0
     @Published var lineOutCM = 0
     @Published var strikeNow = false
+    /// How much of the fish's hold is left (1 just taken, 0 about to spit), in coarse steps.
+    @Published var strikeLeft = 1.0
     @Published var running = false
     @Published var diving = false
     @Published var card: CatchCard?
@@ -70,6 +72,7 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     private var pressing = false
     private var heldToReel = false
     private var pressGeneration = 0
+    private var dipBites = 0
     private var subscriptions: Set<AnyCancellable> = []
     var onClose: (() -> Void)?
     /// Hidden, minimized, or covered windows pause their renderer like every other surface.
@@ -252,8 +255,17 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
         if session.baitLeft != bait { session.baitLeft = bait }
         let line = r.phase == .fighting ? Int(r.lineLength * TankScale.waterHeightCM * TankScale.aspect) : 0
         if session.lineOutCM != line { session.lineOutCM = line }
-        let strike = r.holderID != nil && !r.hook.setsItself
+        // Not on the dips: the skill is waiting for the float to bury.
+        let dipping = r.biteStyle == .dips && r.offering.usesFloat && r.holdElapsed < FishingRig.dipTime
+        let strike = r.holderID != nil && !r.hook.setsItself && !dipping
+        if strike && !session.strikeNow && r.biteStyle == .dips && r.offering.usesFloat && r.holdElapsed >= FishingRig.dipTime {
+            // The dips are over and the float buries: now.
+            play("Tink", volume: 0.45)
+            announce("It's under. Strike now.")
+        }
         if session.strikeNow != strike { session.strikeNow = strike }
+        let left = strike ? (max(0, 1 - r.holdElapsed / max(0.1, r.holdLimit)) * 10).rounded() / 10 : 1
+        if session.strikeLeft != left { session.strikeLeft = left }
         let running = r.phase == .fighting && r.running
         if session.running != running { session.running = running }
         // Only a koi runs with line; smaller fish dive against the rod.
@@ -261,6 +273,22 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
         if session.diving != diving { session.diving = diving }
         if session.card != nil, r.phase != .landed, Date().timeIntervalSince(session.cardShownAt) > 7 {
             session.card = nil
+        }
+    }
+
+    /// What the angler sees as a fish takes: what the float, the fly, or the line does.
+    /// `taught`: after a few dip bites the hint to wait goes; waiting is the angler's own skill.
+    static func takeLine(_ offering: Offering, _ bite: BiteStyle, taught: Bool = false) -> String {
+        switch offering {
+        case .dryFly: return "A sip, and the fly is gone."
+        case .spinner: return "The blade stops dead. Something has the spinner."
+        case .softWorm: return "Tap, tap, and the line goes heavy."
+        default:
+            switch bite {
+            case .dips: return taught ? "The float dips…" : "Dip… dip… wait for it to go under."
+            case .lift: return "The float lifts and lies flat. Something has picked it up."
+            case .sailAway: return "The float slides away under."
+            }
         }
     }
 
@@ -292,7 +320,9 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     private func handle(_ event: FishingEvent) {
         switch event {
         case .splash: play("Pop", volume: 0.25)
-        case .take: if !store.angling.hook.setsItself { play("Tink", volume: 0.45) }
+        case .take:
+            let dips = surface.aquarium.rig.map { $0.biteStyle == .dips && $0.offering.usesFloat } ?? false
+            if !store.angling.hook.setsItself && !dips { play("Tink", volume: 0.45) }
         case .hooked: play("Morse", volume: 0.3)
         case .landed: play("Glass", volume: 0.35)
         case .threwHook, .lineSnapped, .hookStraightened, .hookPulled: play("Blow", volume: 0.2)
@@ -300,6 +330,9 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
         }
         speak(event)
         switch event {
+        case .take where !store.angling.hook.setsItself:
+            let dips = surface.aquarium.rig.map { $0.biteStyle == .dips && $0.offering.usesFloat } ?? false
+            announce(dips ? session.status : session.status + " Strike now.")
         case .take, .hooked, .landed, .threwHook, .lineSnapped, .hookStraightened, .hookPulled, .missed, .spat: announce(session.status)
         default: break
         }
@@ -337,16 +370,18 @@ final class PassThroughHostingView<Content: View>: NSHostingView<Content> {
         case .take(let s):
             store.angling.record(event)
             if circle { session.say("A \(Self.spoken(s)) has taken it. Don't strike, let the circle hook set as it turns…", priority: 3, outcome: true) }
-            else { session.say(store.angling.offering.isLure ? "Hit! STRIKE!" : "The float slides under. STRIKE!", priority: 3, outcome: true) }
+            else {
+                let bite = surface.aquarium.rig?.biteStyle ?? .sailAway
+                if bite == .dips { dipBites += 1 }
+                session.say(Self.takeLine(store.angling.offering, bite, taught: dipBites > 3), priority: 3, outcome: true)
+            }
         case .struckEarly: session.say("Too early! You pulled it away from them.", priority: 2, outcome: true)
         case .twitch: break
         case .missed(let s): session.say("Missed. The \(Self.spoken(s)) let go and bolted.", priority: 2, outcome: true)
         case .spat(let s): session.say("The \(Self.spoken(s)) felt something wrong and spat it out.", priority: 2, outcome: true)
         case .hooked(let s):
             store.angling.record(event)
-            if Tackle.fightStrength(s) < 0.3 { session.say("Fish on! A little \(Self.spoken(s)). Hold to lift it out.", priority: 3, outcome: true) }
-            else if Tackle.fightStrength(s) < 0.6 { session.say("Fish on! A \(Self.spoken(s)). Hold to reel, but ease off when it dives.", priority: 3, outcome: true) }
-            else { session.say("Fish on! A \(Self.spoken(s)). Hold to reel while it rests, let go when it runs.", priority: 3, outcome: true) }
+            session.say(Tackle.fightStrength(s) < 0.3 ? "Fish on! A little \(Self.spoken(s))." : "Fish on! A \(Self.spoken(s)).", priority: 3, outcome: true)
         case .run(let s): session.say("The \(Self.spoken(s)) is running. Let it take line!", priority: 2)
         case .surfaceThrash(let s): session.say("Not beaten yet: the \(Self.spoken(s)) crashes at the surface and dives!", priority: 2)
         case .threwHook(let s):
@@ -394,46 +429,56 @@ struct FishingOverlay: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if session.strikeNow {
-                    Text("STRIKE NOW · click or Space").font(.system(size: 13, weight: .bold)).tracking(1.4)
-                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color(nsColor: NSColor(rgb: 0xf05a28)), in: Capsule())
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Strike").font(.system(size: 15, weight: .semibold))
+                        Text("click or").font(.system(size: 12)).opacity(0.7)
+                        KeyCap(label: "Space")
+                    }
+                    // It fades as the fish's hold runs out, a feel for the timing without a clock.
+                    .opacity(0.4 + 0.6 * session.strikeLeft)
+                    .transition(.opacity)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Strike now: click or press Space")
                 }
                 if session.phase == .fighting {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text("LINE TENSION").font(.system(size: 11, weight: .semibold)).tracking(1.2).opacity(0.8)
+                            Text("Line").font(.system(size: 12, weight: .medium)).opacity(0.75)
                             if session.running {
-                                Text(session.diving ? "DIVE!" : "RUN!").font(.system(size: 11, weight: .heavy)).tracking(1.2)
-                                    .padding(.horizontal, 7).padding(.vertical, 2).background(Color.orange, in: Capsule())
+                                Text(session.diving ? "diving" : "running").font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color(nsColor: NSColor(rgb: 0xffb15c)))
                             }
                             Spacer()
-                            Text(session.slack ? "SLACK. REEL!" : "\(session.lineOutCM) cm out").font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            Text(session.slack ? "slack, reel" : "\(session.lineOutCM) cm out").font(.system(size: 11, weight: .medium)).monospacedDigit()
                                 .foregroundStyle(session.slack ? Color.orange : .white.opacity(0.8))
                         }
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(.white.opacity(0.14))
+                                Capsule().fill(.white.opacity(0.24))
                                 Capsule().fill(tensionColor).frame(width: max(6, geometry.size.width * min(1, session.tension)))
-                                Rectangle().fill(.white.opacity(0.5)).frame(width: 1.5).offset(x: geometry.size.width * 0.85)
+                                // Where the hook starts to give.
+                                Rectangle().fill(.white.opacity(0.7)).frame(width: 1.5, height: 11).offset(x: geometry.size.width * 0.85)
                             }
                         }.frame(height: 11)
-                        Text(session.tension > 0.85 ? "Too much! Let go." : (session.running ? (session.diving ? "It's diving. Ease off or the hook tears out." : "It's running. Let go and let it take line.") : (session.slack ? "Keep the line tight or it will throw the hook." : "It's resting. Hold to reel.")))
+                        Text(session.tension > 0.85 ? "Too much! Let go." : (session.running ? (session.diving ? "It's diving. Ease off or the hook tears out." : "It's running. Let go and let it take line.") : (session.slack ? "Keep the line tight or it will throw the hook." : "It's resting. Hold to reel it in.")))
                             .font(.system(size: 12)).opacity(0.85)
                     }.frame(width: 320)
                 } else if session.phase == .fishing || session.phase == .sinking, session.baitLeft < 1 {
                     HStack(spacing: 8) {
-                        Text("BAIT").font(.system(size: 11, weight: .semibold)).tracking(1.2).opacity(0.8)
+                        Text("Bait").font(.system(size: 12, weight: .medium)).opacity(0.75)
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(.white.opacity(0.14))
                                 Capsule().fill(session.baitLeft > 0.04 ? accent : .orange).frame(width: max(4, geometry.size.width * session.baitLeft))
                             }
                         }.frame(width: 140, height: 6)
-                        Text(session.baitLeft > 0.04 ? "\(Int(session.baitLeft * 100))%" : "bare hook · click to rebait").font(.system(size: 11, design: .monospaced)).opacity(0.8)
+                        Text(session.baitLeft > 0.04 ? "\(Int(session.baitLeft * 100))%" : "bare hook, click the water to rebait").font(.system(size: 11)).monospacedDigit().opacity(0.8)
                     }
                 }
             }
+            .animation(.easeOut(duration: 0.12), value: session.strikeNow)
             .padding(16).frame(maxWidth: 420, alignment: .leading)
-            .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 13))
+            .background(.black.opacity(session.strikeNow ? 0.56 : 0.42), in: RoundedRectangle(cornerRadius: 13))
             .padding(18)
             if let card = session.card {
                 HStack { Spacer(); catchCard(card) }.padding(18)
@@ -444,7 +489,7 @@ struct FishingOverlay: View {
     }
 
     private var tensionColor: Color {
-        session.tension > 0.85 ? Color(nsColor: NSColor(rgb: 0xf05a28)) : (session.tension > 0.6 ? .orange : Color(nsColor: NSColor(rgb: 0x5ccf8a)))
+        session.tension > 0.85 ? Color(nsColor: NSColor(rgb: 0xe0654a)) : (session.tension > 0.6 ? Color(nsColor: NSColor(rgb: 0xffb15c)) : Color(nsColor: NSColor(rgb: 0x7fb8a4)))
     }
 
     private func catchCard(_ card: CatchCard) -> some View {
@@ -469,6 +514,17 @@ struct FishingOverlay: View {
 
     static func weight(_ grams: Double) -> String {
         grams >= 1000 ? String(format: "%.2f kg", grams / 1000) : (grams >= 10 ? String(format: "%.0f g", grams) : String(format: "%.1f g", grams))
+    }
+}
+
+/// A key or button named the way the keyboard shows it, outlined rather than filled.
+struct KeyCap: View {
+    var label: String
+    var body: some View {
+        Text(label).font(.system(size: 11, weight: .medium))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.45), lineWidth: 1))
     }
 }
 

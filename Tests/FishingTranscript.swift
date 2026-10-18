@@ -84,7 +84,9 @@ struct Tally {
             case .take:
                 tally.takes += 1
                 // A human sees the float go and lifts after a quarter of a second or so.
-                if !hook.setsItself || style == .impatient { angler.strikeAt = t + angler.dice.value(0.18...0.4) }
+                // On a small fish's dips a skilled angler waits for the float to bury.
+                let dips = style != .impatient && sim.rig?.biteStyle == .dips && offering.usesFloat ? FishingRig.dipTime : 0
+                if !hook.setsItself || style == .impatient { angler.strikeAt = t + dips + angler.dice.value(0.18...0.4) }
             case .missed: tally.missed += 1
             case .spat: tally.spat += 1
             case .hooked(let s): tally.hooked += 1; fightStart = t; _ = s; angler.strikeAt = nil

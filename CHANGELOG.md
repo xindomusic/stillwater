@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.1 — 2026-10-18
+
+- **Bites you read from the float, not from a badge.** The orange halo and the "STRIKE NOW" pill are gone. A take now shows the way it does in clear water:
+  - Small fish dip the float twice before it buries. Strike on the dips and the bait usually comes away; the Strike prompt, its tick, and the VoiceOver cue wait for the bury.
+  - A loach, or any fish picking a bait up off the bottom, lifts the float so it keels over flat, and the line goes slack.
+  - Bigger fish sail it away under, trailing behind them.
+  - The bright collar where the tip breaks the film snaps shut, and broken, hand-drawn rings spread from the dent.
+  - A dry fly goes in a dimpled sip as the fish noses up and turns down.
+  - A sunk lure is hit with a flank flash, a line kick, and head-shakes.
+- **A quieter readout.** The prompt is a plain "Strike, click or Space" line that fades as the fish's hold runs out. The fight readout loses its all-caps labels and badges, and the take messages read like an angler talking.
+
 ## 2.0.0 — 2026-10-18
 
 - **Go fishing.** A new fishing window (fish menu → Go Fishing…, ⌘G in Stillwater, or Settings → Fishing) opens onto your aquarium with a rod in hand; the desktop aquarium is never disturbed. Click the water to cast there, click to strike, hold to reel, Esc to bring the line in.

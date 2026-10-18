@@ -427,6 +427,11 @@ enum RigPhase: String, Equatable, Sendable {
 }
 
 /// The terminal tackle in the water, the float above it, and the state of the fight.
+/// The three float bites anglers know: a small fish's quick dips before the float buries, a
+/// fish picking the bait up off the bottom so the shot lifts and the float keels over flat, and
+/// a bigger fish sailing the float away under.
+enum BiteStyle: Equatable { case dips, lift, sailAway }
+
 struct FishingRig {
     /// Reeling speed at the default reel, in scene widths per second (about 3 cm/s in the tank).
     static let reelSpeed = 0.042
@@ -436,6 +441,9 @@ struct FishingRig {
     static let landedDuration = 3.2
     static let retieDuration = 2.4
     static let flightDuration = 0.75
+    /// A small fish's dips before the float buries: one every `dipBeat` seconds, two of them.
+    static let dipBeat = 0.2
+    static let dipTime = 0.4
 
     var hook: HookKind
     var offering: Offering
@@ -469,6 +477,13 @@ struct FishingRig {
     /// The fish mouthing the bait right now, and how long since it took it.
     var holderID: Int?
     var holdElapsed = 0.0
+    /// Seconds since the last take, and where on the film it happened: the rings and the
+    /// bubbles a float leaves as it is dragged under keep spreading after the fish lets go.
+    var takeAge = 99.0
+    var takeX = 0.5
+    /// How the float shows this take, and which way the fish turned with the bait.
+    var biteStyle: BiteStyle = .sailAway
+    var takeSide = 1.0
     var holdLimit = 0.0
     /// A strike asked for by the angler, applied in the next step.
     var pendingStrike = false
