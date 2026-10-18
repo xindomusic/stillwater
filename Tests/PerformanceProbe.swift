@@ -39,7 +39,7 @@ import Darwin
             let start = ProcessInfo.processInfo.systemUptime, cpuStart = cpu(), frames = preview.aquarium.frameCount
             wait(6)
             let elapsed = ProcessInfo.processInfo.systemUptime - start
-            samples.append(["scenario": label, "fps": Double(preview.aquarium.frameCount - frames) / elapsed,
+            samples.append(["scenario": label, "targetFPS": quality.fps, "fps": Double(preview.aquarium.frameCount - frames) / elapsed,
                 "cpuPercentOfOneCore": (cpu() - cpuStart) / elapsed * 100, "physicalFootprintMiB": Double(footprint()) / 1_048_576])
         }
         config.mode = .still; desktop.apply(config); preview.apply(config); wait(0.3)
@@ -47,13 +47,30 @@ import Darwin
         let textureBytes = FishSpecies.allCases.reduce(0.0) { total, species in
             let size = Artwork.fishTexture(species).size(); return total + size.width * size.height * 4
         }
-        let result: [String: Any] = ["samples": samples, "stillCPUPercentOfOneCore": (cpu() - start) / 2 * 100,
+        let sceneSize = Artwork.sceneTexture(config.theme).size()
+        let stillCPU = (cpu() - start) / 2 * 100
+        // Budgets make regressions visible in the report without failing a noisy
+        // short probe: violations are listed, and the probe still exits zero.
+        let budgets: [String: Any] = ["minimumFPSFractionOfTarget": 0.9, "maximumFootprintMiB": 300.0,
+            "maximumStillCPUPercentOfOneCore": 2.0]
+        var violations: [String] = []
+        for sample in samples {
+            let label = sample["scenario"] as? String ?? "?", fps = sample["fps"] as? Double ?? 0
+            let target = Double(sample["targetFPS"] as? Int ?? 0), mib = sample["physicalFootprintMiB"] as? Double ?? 0
+            if fps < target * 0.9 { violations.append("\(label): \(fps) fps is below 90% of the \(Int(target)) fps target") }
+            if mib > 300 { violations.append("\(label): \(mib) MiB footprint exceeds the 300 MiB budget") }
+        }
+        if stillCPU > 2.0 { violations.append("still: \(stillCPU)% of one core exceeds the 2% budget") }
+        let result: [String: Any] = ["samples": samples, "stillCPUPercentOfOneCore": stillCPU,
             "stillFrames": preview.aquarium.frameCount - frames, "fishTextureRGBABytes": textureBytes,
+            "sceneTextureRGBABytes": sceneSize.width * sceneSize.height * 4,
+            "budgets": budgets, "budgetViolations": violations,
             "scope": "Two visible production surfaces, 1920x1080 and 960x540; six-second samples after three-second warmup. Maximum scenarios contain 12 of each of the 10 species. No screenshots, feeding, or global preferences. Not a sustained power benchmark."]
         let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
         let output = CommandLine.arguments.dropFirst().first ?? "build/performance.json"
         try data.write(to: URL(fileURLWithPath: output))
         print(String(decoding: data, as: UTF8.self))
+        violations.forEach { print("BUDGET VIOLATION: \($0)") }
         windows.forEach { $0.orderOut(nil) }
     }
 }

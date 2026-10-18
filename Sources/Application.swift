@@ -287,8 +287,8 @@ final class DesktopWindow: NSWindow {
             ?? surfaces(in: settingsWindow?.contentView).first
             ?? previewWindow?.contentView as? AquariumSurface
         let surface = AquariumSurface(frame: CGRect(origin: .zero, size: pixels), configuration: store.configuration)
-        if let source { surface.aquarium.restoreSimulation(source.aquarium.simulation) }
         surface.isPaused = true
+        if let source { surface.aquarium.restoreSnapshot(from: source.aquarium) }
         return surface.pngData()
     }
 
@@ -310,17 +310,11 @@ final class DesktopWindow: NSWindow {
         do {
             let directory = try WallpaperStills.folder()
             let screens = store.configuration.allDisplays ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
-            var written: [URL] = []
             for screen in screens {
                 guard let data = snapshotData(for: screen) else { throw AquariumError.snapshot }
-                // A fresh name makes macOS reload the wallpaper instead of keeping a cached image.
-                let url = directory.appendingPathComponent("\(store.configuration.theme.rawValue)-\(UUID().uuidString).png")
-                try data.write(to: url, options: .atomic)
-                written.append(url)
+                let url = try WallpaperStills.save(data, theme: store.configuration.theme, in: directory)
                 try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [.imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue, .allowClipping: true])
             }
-            let inUse = NSScreen.screens.compactMap { NSWorkspace.shared.desktopImageURL(for: $0) }
-            WallpaperStills.prune(in: directory, keeping: written + inUse)
             var next = store.configuration; next.mode = .still; next.wallpaperEnabled = false; store.configuration = next
             store.message = "Saved as your macOS wallpaper. It stays even when Stillwater quits."
         } catch { present(error) }

@@ -11,8 +11,10 @@ Stillwater uses Swift, AppKit, SwiftUI, SpriteKit, Combine, and the Carbon hotke
 | `Sources/FishBehavior.swift` | Per-fish state and temperament, framing, navigation, shrimp steps and escapes, crab gait, and fin strokes |
 | `Sources/Bubbles.swift` | Tank scale, air-stone and plant bubble sources, size-dependent rise, flattening, and zigzag |
 | `Sources/Sand.swift` | Sand grains and silt clouds kicked up by residents, settling back to the bed |
-| `Sources/Simulation.swift` | The simulation step: moods, food choice, steering, banked turns, depth, pellets, and bubbles |
-| `Sources/WallpaperStills.swift` | Saved wallpaper stills and pruning of stills no display uses |
+| `Sources/Simulation.swift` | The simulation step: moods, steering, banked turns, depth, and bubbles |
+| `Sources/SimulationFeeding.swift` | Feeding extension: dropping pellets, noticing food, and eating |
+| `Sources/SimulationBed.swift` | Sand-bed extension: lanes, resting spots, and keeping bed neighbours apart |
+| `Sources/WallpaperStills.swift` | Saved wallpaper stills, retained for other Spaces and disconnected displays, with the count/size summary Settings shows |
 | `Sources/AquariumScene.swift` | SpriteKit rendering, body/fin shaders, day/night fade, particles, and pause behavior |
 | `Sources/Artwork.swift` | Images, pose rectangles, cached motion masks, and contact shadows |
 | `Sources/FishRendering.swift` | Continuous curved-body projection and body/fin motion |
@@ -34,6 +36,8 @@ zsh tools/build.sh
 
 The build script archives any previous local app bundle under `build/`, compiles the executable, copies only current artwork and the license, then ad-hoc signs the app. Use a current Apple command-line toolchain. CI performs model tests, compilation, bundle validation, and architecture checks on an Apple Silicon macOS runner.
 
+All targets compile in Swift 6 language mode (strict concurrency). Compiler flags and the source file lists for the test and benchmark binaries live in one place, `tools/sources.zsh`, sourced by every tool script; add new files there. The app target globs `Sources/*.swift`. Species-only behavior state lives in the `SpeciesBehavior` enum payload on `FishState`, so ordinary fish carry no shrimp, crab, or loach machinery. Crab gait constants shared between simulation and shader (stride, stance share, foreshortening) are generated into the GLSL from `AquariumSimulation` by `FishRendering`, and a rendering test asserts the generated literals. A tuned `.swift-format` config records the house style (dense one-liners and semicolons are idiomatic here); it is not yet enforced in CI, since the default rule set would reformat the whole tree — that migration should be its own change, not folded into a feature release.
+
 Native verification requires a logged-in macOS graphical session:
 
 ```sh
@@ -50,7 +54,7 @@ Native shader regression checks also require a graphical session:
 zsh tools/test-rendering.sh
 ```
 
-These render real SpriteKit shader output. A red/blue fixture detects accidental crossfading of separate fish views. Each scene is checked for independently moving plants and water, zero-intensity behavior, and complete Still freezing. Enlarged fish-turn and bubble-material captures are saved under `build/rendering-review/`.
+These render real SpriteKit shader output. A red/blue fixture detects accidental crossfading of separate fish views. Each scene is checked for independently moving plants and water, zero-intensity behavior, and complete Still freezing. Enlarged fish-turn and bubble-material captures are saved under `build/rendering-review/`. Without a graphical session (SSH, a sandboxed shell) SpriteKit cannot create its view and the process is killed; the script detects that exit and explains it instead of reporting a bare crash. `tools/benchmark.sh` reports performance budgets (frame-rate fraction of target, memory footprint, Still-mode CPU) and lists any violations in its JSON without failing the probe.
 
 ### Continuous fish turns
 

@@ -1,6 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+source tools/sources.zsh
 app_dir="build/Stillwater.app"
 # Archive the previous local bundle so obsolete development artwork cannot leak into a release.
 if [[ -d "$app_dir" ]]; then
@@ -8,7 +9,7 @@ if [[ -d "$app_dir" ]]; then
   mv "$app_dir" "$previous_build"
 fi
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources/Scenes" "$app_dir/Contents/Resources/Fish" build/module-cache
-xcrun swiftc -swift-version 5 -O -module-cache-path build/module-cache -target arm64-apple-macos14.0 \
+xcrun swiftc $swift_flags -target arm64-apple-macos14.0 \
   -framework AppKit -framework SwiftUI -framework SpriteKit -framework Combine -framework UniformTypeIdentifiers -framework Carbon \
   Sources/*.swift -o build/Stillwater.app/Contents/MacOS/Stillwater
 cp Resources/Info.plist build/Stillwater.app/Contents/Info.plist

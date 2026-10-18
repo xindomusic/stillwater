@@ -3,6 +3,9 @@ import SpriteKit
 import CoreImage
 import ImageIO
 
+/// Texture and colour caches. Every caller renders on the main thread (SpriteKit scenes,
+/// snapshot export, and the review harness), so the mutable caches are `nonisolated(unsafe)`
+/// under Swift 6 rather than actor-isolated; do not call Artwork from a background queue.
 enum Artwork {
     static let root: URL = {
         let bundled = Bundle.main.resourceURL!
@@ -11,8 +14,8 @@ enum Artwork {
     }()
     static func sceneURL(_ theme: AquariumTheme) -> URL { root.appendingPathComponent("Scenes/\(theme.assetName).png") }
     static func image(_ theme: AquariumTheme) -> NSImage { NSImage(contentsOf: sceneURL(theme)) ?? NSImage(size: NSSize(width: 16, height: 9)) }
-    private static var regionTextures: [AquariumTheme: SKTexture] = [:]
-    private static var currentSceneTexture: (AquariumTheme, SKTexture)?
+    nonisolated(unsafe) private static var regionTextures: [AquariumTheme: SKTexture] = [:]
+    nonisolated(unsafe) private static var currentSceneTexture: (AquariumTheme, SKTexture)?
     static func sceneTexture(_ theme: AquariumTheme) -> SKTexture {
         if let cached = currentSceneTexture, cached.0 == theme { return cached.1 }
         let texture = SKTexture(image: image(theme))
@@ -49,7 +52,7 @@ enum Artwork {
     private static let gpuImageContext = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
 
     /// A soft white dot for floating particles, tinted per sprite.
-    static let mote: SKTexture = {
+    nonisolated(unsafe) static let mote: SKTexture = {
         let context = CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(CGColor(gray: 1, alpha: 1))
@@ -59,7 +62,7 @@ enum Artwork {
         return texture
     }()
 
-    private static var sandColors: [String: NSColor] = [:]
+    nonisolated(unsafe) private static var sandColors: [String: NSColor] = [:]
     /// The colour of the lit sand at a point on the bed, sampled from the artwork around it.
     static func sandColor(_ theme: AquariumTheme, x: Double, y: Double) -> NSColor {
         let key = "\(theme.rawValue)-\(Int(x * 100))-\(Int(y * 100))"
@@ -91,7 +94,7 @@ enum Artwork {
     }
 
     /// A few irregular sand grains, lit from above, so a puff reads as sand rather than dots.
-    static let sandGrains: [SKTexture] = (0..<4).map { variant in
+    nonisolated(unsafe) static let sandGrains: [SKTexture] = (0..<4).map { variant in
         let size = 24
         let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -118,7 +121,7 @@ enum Artwork {
     /// Which of the crab's eight walking legs each photographed pixel belongs to (red channel:
     /// leg index + 1, times 25; zero for the shell, claws, and water), so the shader can move each
     /// leg as one rigid limb.
-    static let crabLegLabels: SKTexture = {
+    nonisolated(unsafe) static let crabLegLabels: SKTexture = {
         let side = 512
         let photo = fishTexture(.crab).cgImage()
         let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
@@ -167,7 +170,7 @@ enum Artwork {
     }()
 
     /// A soft round glow that fades to transparent, for clouds of stirred-up silt.
-    static let softDot: SKTexture = {
+    nonisolated(unsafe) static let softDot: SKTexture = {
         let context = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 256,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         let colors = [CGColor(gray: 1, alpha: 1), CGColor(gray: 1, alpha: 0.35), CGColor(gray: 1, alpha: 0)] as CFArray
@@ -178,8 +181,8 @@ enum Artwork {
         return texture
     }()
 
-    private static var fishTextures: [FishSpecies: SKTexture] = [:]
-    private static var fishYBounds: [FishSpecies: SIMD2<Float>] = [:]
+    nonisolated(unsafe) private static var fishTextures: [FishSpecies: SKTexture] = [:]
+    nonisolated(unsafe) private static var fishYBounds: [FishSpecies: SIMD2<Float>] = [:]
     static func fishVisibleY(_ species: FishSpecies) -> SIMD2<Float> {
         _ = fishTexture(species)
         return fishYBounds[species]!
@@ -247,7 +250,7 @@ enum Artwork {
         let cg = fishTexture(species).cgImage()
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
-    static let contactShadow: SKTexture = {
+    nonisolated(unsafe) static let contactShadow: SKTexture = {
         let context = CGContext(data: nil, width: 128, height: 32, bitsPerComponent: 8, bytesPerRow: 512,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.translateBy(x: 64, y: 16); context.scaleBy(x: 64, y: 16)

@@ -60,6 +60,24 @@ struct FeedingResponse {
 /// Fish live in a shallow 3D tank: `x`/`y` are screen coordinates and `depth` is the
 /// scale towards the viewer (larger is closer). `yaw` rotates the body about the
 /// vertical axis: 0 faces right, π faces left, π/2 faces away from the viewer.
+/// Behavior state that only one kind of resident uses. Keeping it in an enum payload means a
+/// fish carries no shrimp, crab, or loach machinery it will never run.
+enum SpeciesBehavior {
+    case shrimp(ShrimpBehavior)
+    case crab(CrabGait)
+    case loach(BurstRhythm)
+    case fish
+
+    init(species: FishSpecies) {
+        switch species {
+        case .shrimp: self = .shrimp(ShrimpBehavior(seed: 1))
+        case .crab: self = .crab(CrabGait(seed: 1))
+        case .loach: self = .loach(BurstRhythm(seed: 1))
+        default: self = .fish
+        }
+    }
+}
+
 struct FishState: Identifiable {
     /// Depth band shared with particles, so far food passes behind every fish and near food in front.
     static let depthRange = 0.70...1.15
@@ -95,30 +113,24 @@ struct FishState: Identifiable {
     var appetite = 1.0
     var feeding: FeedingResponse?
     var feedingCooldown = 0.0
-    var shrimpBehavior = ShrimpBehavior(seed: 1)
-    var crabGait = CrabGait(seed: 1)
+    /// Species-specific behavior; only the matching payload exists for a given resident.
+    var speciesBehavior: SpeciesBehavior
+
+    /// Typed access to the payload. Call sites are already guarded by species, so the
+    /// fallback is unreachable in practice; it keeps a mismatched read harmless.
+    var shrimpBehavior: ShrimpBehavior {
+        get { if case .shrimp(let value) = speciesBehavior { return value }; return ShrimpBehavior(seed: 1) }
+        set { speciesBehavior = .shrimp(newValue) }
+    }
+    var crabGait: CrabGait {
+        get { if case .crab(let value) = speciesBehavior { return value }; return CrabGait(seed: 1) }
+        set { speciesBehavior = .crab(newValue) }
+    }
     /// Wriggle-and-pause rhythm of a loach working over the sand.
-    var burst = BurstRhythm(seed: 1)
-    /// The line a crab's feet sweep along (a unit vector in photo space, y up). It follows the
-    /// direction of travel, but only as an axis: walking back along it runs the gait in reverse.
-    var legAxisX = 1.0, legAxisY = 0.0
-    /// 0 while a crab walks; eases to 1 as it stands, bringing lifted feet down to rest.
-    var legSettle = 1.0
-    /// A loach's own clock for pecking at the sand and rippling at rest, and how far into a
-    /// sifting pause it is (0 swimming, 1 head down working the sand).
-    var siftClock = 0.0, siftEnvelope = 0.0
-    /// Where a loach that has just decided to rest is heading to lie down: at the foot of a rock,
-    /// or alongside another resting loach.
-    var restSpot: SIMD2<Double>?
-    /// The resting loach it is going to lie beside, if any.
-    var restCompanion: Int?
-    /// The head position a loach last chose, held for a moment before it changes again.
-    var headTarget = 0.0, headHold = 0.0
-    /// A shrimp's claws picking at the surface it stands on, several times a second: their
-    /// rhythm, and how much they are picking (0 walking, 1 standing to graze).
-    var pickPhase = 0.0, pickEnvelope = 0.0
-    /// How long a loach has gone without a real dart, in movement units.
-    var parkedFor = 0.0
+    var burst: BurstRhythm {
+        get { if case .loach(let value) = speciesBehavior { return value }; return BurstRhythm(seed: 1) }
+        set { speciesBehavior = .loach(newValue) }
+    }
 
     init(id: Int, species: FishSpecies, x: Double, y: Double, depth: Double, facingRight: Bool, finPhase: Double, moodRemaining: Double) {
         self.id = id
@@ -132,6 +144,7 @@ struct FishState: Identifiable {
         self.yaw = species == .crab || facingRight ? 0 : .pi
         self.finPhase = finPhase
         self.moodRemaining = moodRemaining
+        self.speciesBehavior = SpeciesBehavior(species: species)
     }
 
     /// A gourami or betta resting in mid-water, which turns on its fins rather than its body.
@@ -233,6 +246,9 @@ struct ShrimpBehavior {
     private(set) var escapeDirection = 1.0
     private var escapeCooldown = 0.0
     private(set) var escapes = 0
+    /// The claws picking at the surface the shrimp stands on, several times a second: their
+    /// rhythm, and how much they are picking (0 walking, 1 standing to graze).
+    var pickPhase = 0.0, pickEnvelope = 0.0
 
     init(seed: UInt64) {
         dice = Dice(seed: seed)
@@ -413,6 +429,18 @@ struct BurstRhythm {
     /// How hard this bout drives, as a share of a full dart: most are an unhurried crawl over the
     /// sand, some a steady swim, and only now and then a quick dart.
     private(set) var pace = 0.5
+    /// The loach's own clock for pecking at the sand and rippling at rest, and how far into a
+    /// sifting pause it is (0 swimming, 1 head down working the sand).
+    var siftClock = 0.0, siftEnvelope = 0.0
+    /// Where a loach that has just decided to rest is heading to lie down: at the foot of a rock,
+    /// or alongside another resting loach.
+    var restSpot: SIMD2<Double>?
+    /// The resting loach it is going to lie beside, if any.
+    var restCompanion: Int?
+    /// The head position the loach last chose, held for a moment before it changes again.
+    var headTarget = 0.0, headHold = 0.0
+    /// How long the loach has gone without a real dart, in movement units.
+    var parkedFor = 0.0
 
     init(seed: UInt64) {
         dice = Dice(seed: seed)
@@ -615,6 +643,11 @@ struct CrabGait {
     /// Speed of the current burst, relative to cruise speed.
     private(set) var pace = 1.0
     private(set) var bouts = 0
+    /// The line the feet sweep along (a unit vector in photo space, y up). It follows the
+    /// direction of travel, but only as an axis: walking back along it runs the gait in reverse.
+    var legAxisX = 1.0, legAxisY = 0.0
+    /// 0 while walking; eases to 1 as the crab stands, bringing lifted feet down to rest.
+    var legSettle = 1.0
 
     init(seed: UInt64) {
         dice = Dice(seed: seed)

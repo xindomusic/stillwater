@@ -5,8 +5,9 @@ import Carbon
 @MainActor final class FeedingShortcut {
     static let label = "⌃⌥⌘F"
     static let identifier = EventHotKeyID(signature: 0x53574644, id: 1) // SWFD
-    private var hotKey: EventHotKeyRef?
-    private var handler: EventHandlerRef?
+    // Carbon refs are only touched on the main actor, plus deinit cleanup under Swift 6.
+    nonisolated(unsafe) private var hotKey: EventHotKeyRef?
+    nonisolated(unsafe) private var handler: EventHandlerRef?
     private var action: (() -> Void)?
     var isRegistered: Bool { hotKey != nil }
 

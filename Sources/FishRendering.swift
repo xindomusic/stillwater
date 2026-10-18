@@ -13,7 +13,14 @@ enum FishRendering {
             + ["a_sampleScale", "a_visibleY"].map { SKAttribute(name: $0, type: .vectorFloat2) }
         return shader
     }
-    static let shaderSource = """
+    /// Formats a Swift tuning value as a GLSL float literal, so gait constants shared with
+    /// the simulation (crab stride, stance share, stride foreshortening) have one source of
+    /// truth in `AquariumSimulation` instead of matching numbers kept in sync by comment.
+    private static func glsl(_ value: Double) -> String {
+        let text = String(value)
+        return text.contains(".") ? text : text + ".0"
+    }
+    static var shaderSource: String { """
         // Lateral centerline and its slope: the head leads while the posterior
         // bends behind it. Polynomial coefficients are prepared once per fish.
         vec2 spine(float x, vec2 photoScale, vec4 curve) {
@@ -215,9 +222,9 @@ enum FishRendering {
                         float side = float(i - (i / 2) * 2);
                         float pair = float(i / 2);
                         float cycle = fract((a_finPhase + mod(pair + side, 2.0) * 3.14159265 + pair * 0.12) / 6.2831853);
-                        float sweep = 1.0 - 2.0 * cycle / 0.6, lift = 0.0;
-                        if (cycle >= 0.6) {
-                            float t = (cycle - 0.6) / 0.4;
+                        float sweep = 1.0 - 2.0 * cycle / \(glsl(AquariumSimulation.crabStance)), lift = 0.0;
+                        if (cycle >= \(glsl(AquariumSimulation.crabStance))) {
+                            float t = (cycle - \(glsl(AquariumSimulation.crabStance))) / \(glsl(1 - AquariumSimulation.crabStance));
                             sweep = -1.0 + 2.0 * t * t * (3.0 - 2.0 * t);
                             lift = sin(t * 3.14159265);
                         }
@@ -225,7 +232,7 @@ enum FishRendering {
                         // (Simulation.crabStride). A crab coming to a stop lowers each lifted foot where it
                         // is, so no foot slides across the sand.
                         // A stride toward or away from the viewer is drawn foreshortened (Simulation.crabVerticalStride).
-                        vec2 foot = restFoot + legAxis * vec2(1.0, 0.5) * sweep * 0.1 + vec2(0.0, lift * 0.045 * power);
+                        vec2 foot = restFoot + legAxis * vec2(1.0, \(glsl(AquariumSimulation.crabVerticalStride))) * sweep * \(glsl(AquariumSimulation.crabStride / 2)) + vec2(0.0, lift * 0.045 * power);
                         // Two-bone reach with the knee raised, as crab legs are held.
                         float upper = length(restKnee - root), lower = length(restFoot - restKnee);
                         vec2 reach = foot - root;
@@ -455,4 +462,5 @@ enum FishRendering {
             }
         }
         """
+    }
 }

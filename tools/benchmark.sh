@@ -1,9 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
+source tools/sources.zsh
 mkdir -p build/module-cache
-xcrun swiftc -swift-version 5 -O -module-cache-path build/module-cache \
+xcrun swiftc $swift_flags \
   -framework AppKit -framework SpriteKit -framework Combine \
-  Sources/Configuration.swift Sources/Dice.swift Sources/FishBehavior.swift Sources/Bubbles.swift Sources/Sand.swift Sources/Simulation.swift Sources/Artwork.swift Sources/FishRendering.swift Sources/BubbleRendering.swift \
-  Sources/WaterRendering.swift Sources/PelletRendering.swift Sources/AquariumScene.swift Tests/PerformanceProbe.swift -o build/performance-probe
+  $rendering_sources Tests/PerformanceProbe.swift -o build/performance-probe
 build/performance-probe "$@"

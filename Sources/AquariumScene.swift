@@ -247,7 +247,7 @@ final class AquariumScene: SKScene {
             node.setValue(node.strokeValue, forAttribute: "a_stroke")
             // A shrimp's third and fourth fin components carry its claws' picking rhythm and strength.
             node.finsValue.vectorFloat4Value = f.species == .shrimp
-                ? SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.pickPhase + Double(f.id) * 2.4), Float(f.pickEnvelope))
+                ? SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.shrimpBehavior.pickPhase + Double(f.id) * 2.4), Float(f.shrimpBehavior.pickEnvelope))
                 : SIMD4(Float(f.stroke.pectoralPhase), Float(f.stroke.dorsalPhase), Float(f.stroke.spread), Float(f.stroke.finAmplitude))
             node.setValue(node.finsValue, forAttribute: "a_fins")
             var curve = f.spineCurve
@@ -261,8 +261,8 @@ final class AquariumScene: SKScene {
             if f.species == .crab {
                 // Legs: the axis the feet sweep along, how settled they are, and a bob of the shell
                 // (two rises per step cycle, in photo units) that leaves the planted feet in place.
-                let bob = abs(sin(f.finPhase)) * 0.028 * (1 - f.legSettle)
-                curve = SIMD4(Float(f.legAxisX), Float(f.legAxisY), Float(f.legSettle), Float(bob))
+                let bob = abs(sin(f.finPhase)) * 0.028 * (1 - f.crabGait.legSettle)
+                curve = SIMD4(Float(f.crabGait.legAxisX), Float(f.crabGait.legAxisY), Float(f.crabGait.legSettle), Float(bob))
             }
             node.curveValue.vectorFloat4Value = curve; node.setValue(node.curveValue, forAttribute: "a_curve")
             let bite: Double
@@ -276,11 +276,11 @@ final class AquariumScene: SKScene {
             // It eases its head down as a pause begins, then jabs at the sand about twice a second
             // in irregular spells; the fourth component is a slow resting ripple of its body.
             if f.species == .loach {
-                let spell = 0.5 + 0.5 * sin(f.siftClock * 0.9 + Double(f.id))
+                let spell = 0.5 + 0.5 * sin(f.burst.siftClock * 0.9 + Double(f.id))
                 // Only a foraging loach jabs at the sand; a resting one just lies with its chin down.
-                let jab = f.burst.regime == .forage ? max(0, sin(f.siftClock * 2 * .pi * 1.8)) * spell : 0
-                node.strokeValue.vectorFloat4Value.z = Float(f.siftEnvelope * (0.55 + 0.45 * jab))
-                node.strokeValue.vectorFloat4Value.w = Float((f.siftClock * .pi).truncatingRemainder(dividingBy: 2 * .pi))
+                let jab = f.burst.regime == .forage ? max(0, sin(f.burst.siftClock * 2 * .pi * 1.8)) * spell : 0
+                node.strokeValue.vectorFloat4Value.z = Float(f.burst.siftEnvelope * (0.55 + 0.45 * jab))
+                node.strokeValue.vectorFloat4Value.w = Float((f.burst.siftClock * .pi).truncatingRemainder(dividingBy: 2 * .pi))
                 node.setValue(node.strokeValue, forAttribute: "a_stroke")
             }
             node.zRotation = CGFloat((f.pitch + bite + sinking) * cos(f.yaw))
@@ -404,6 +404,15 @@ final class AquariumScene: SKScene {
         }
         positionContents()
     }
+    /// Exports preserve the visible lighting, including a partially completed day/night fade.
+    func restoreSnapshot(from source: AquariumScene) {
+        restoreSimulation(source.simulation)
+        systemIsDark = source.systemIsDark
+        nightTarget = source.nightTarget
+        nightAmount = source.nightAmount
+        positionContents()
+    }
+
     func restoreSimulation(_ state: AquariumSimulation) {
         // Snapshot/export state may reuse IDs with different species or depths.
         // Recreate their immutable rendering attributes once when restoring.

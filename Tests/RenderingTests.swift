@@ -22,6 +22,17 @@ import UniformTypeIdentifiers
         app.setActivationPolicy(.accessory)
         let output = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "build/rendering-review")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        // Announce before creating any SpriteKit view: without a GPU/graphical session the
+        // process dies inside SKView, and this line shows how far startup actually got.
+        print("Rendering tests: creating SpriteKit view (needs a graphical session)…"); fflush(stdout)
+        // Gait constants are generated into the shader from the simulation's tuning values:
+        // if someone re-hardcodes a number in the GLSL, feet would drift from the sand.
+        func glsl(_ value: Double) -> String { let s = String(value); return s.contains(".") ? s : s + ".0" }
+        let generated = FishRendering.shaderSource
+        require(generated.contains("cycle / \(glsl(AquariumSimulation.crabStance))"), "Crab stance share must be generated from AquariumSimulation.crabStance")
+        require(generated.contains("sweep * \(glsl(AquariumSimulation.crabStride / 2))"), "Crab stride must be generated from AquariumSimulation.crabStride")
+        require(generated.contains("vec2(1.0, \(glsl(AquariumSimulation.crabVerticalStride)))"), "Crab stride foreshortening must be generated from AquariumSimulation.crabVerticalStride")
+        print("PASS: crab gait constants are generated from the simulation tuning values"); fflush(stdout)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
         let view = SKView(frame: window.contentView!.bounds)
         window.contentView = view; window.orderFront(nil)
@@ -402,6 +413,35 @@ import UniformTypeIdentifiers
             require(abs(node.zPosition - (5 + fish.depth)) < 0.000001 && node.texture?.size() == Artwork.fishTexture(fish.species).size(), "Restored snapshots must refresh cached depth and species")
         }
         print("PASS: snapshot restoration refreshes immutable fish rendering attributes")
+        // Capture halfway through both directions of a fade. Compare actual pixels so
+        // restoring only the numeric lighting value without updating shaders cannot pass.
+        for followsSystem in [false, true] {
+            for startsDark in [false, true] {
+                var config = AquariumConfiguration()
+                config.lighting = followsSystem ? .system : (startsDark ? .night : .day)
+                config.bubbles = true
+                let source = AquariumSurface(frame: CGRect(x: 0, y: 0, width: 640, height: 360), configuration: config)
+                source.isPaused = true
+                source.aquarium.setSystemDark(startsDark, immediate: true)
+                if followsSystem { source.aquarium.setSystemDark(!startsDark) }
+                else {
+                    config.lighting = startsDark ? .day : .night
+                    source.apply(config)
+                    source.isPaused = true
+                }
+                source.aquarium.feed()
+                source.aquarium.advanceForReview(seconds: 0.4)
+                let amount = source.aquarium.nightAmount
+                require(amount > 0.1 && amount < 0.9, "Snapshot fixture must be partway through a lighting fade")
+                let snapshot = AquariumSurface(frame: source.frame, configuration: config)
+                snapshot.isPaused = true
+                snapshot.aquarium.restoreSnapshot(from: source.aquarium)
+                require(snapshot.aquarium.nightAmount == amount, "Snapshot must preserve transitional lighting")
+                require(snapshot.aquarium.simulation.time == source.aquarium.simulation.time, "Taking a snapshot must not advance the simulation")
+                require(snapshot.pngData()! == source.pngData()!, "Export pixels must match the visible scene during manual and system lighting fades")
+            }
+        }
+        print("PASS: snapshots preserve rendered lighting in both directions of manual and system fades")
         window.orderOut(nil)
         print("Rendered turn comparisons to \(output.path)")
     }

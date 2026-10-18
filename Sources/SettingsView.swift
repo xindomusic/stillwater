@@ -49,6 +49,11 @@ struct SettingsView: View {
     var reviewResidentFilter: String? = nil
     @ViewState private var section: SettingsSection = .aquarium
     @ViewState private var showReset = false
+    @ViewState private var stills = WallpaperStills.Summary()
+
+    private func refreshStills() {
+        if let current = WallpaperStills.current() { stills = current.summary }
+    }
 
     private var config: AquariumConfiguration { store.configuration }
     private var activeSection: SettingsSection { reviewSection ?? section }
@@ -329,6 +334,22 @@ struct SettingsView: View {
                     ForEach(RenderQuality.allCases) { quality in Text(quality.title).tag(quality) }
                 }.labelsHidden().frame(width: 185)
             }.padding(18).background(Palette.card, in: RoundedRectangle(cornerRadius: 11))
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Saved wallpapers").font(.system(size: 12, weight: .medium))
+                    Text(stills.count == 0
+                        ? "Stills you set as a macOS wallpaper are kept in a folder, so other Spaces and displays keep working."
+                        : "\(stills.count) saved still\(stills.count == 1 ? "" : "s") · \(ByteCountFormatter.string(fromByteCount: stills.bytes, countStyle: .file)). They are kept until you remove them; another Space or a disconnected display may still be showing one.")
+                        .font(.system(size: 10)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Open folder") {
+                    if let folder = try? WallpaperStills.folder() { NSWorkspace.shared.open(folder) }
+                    refreshStills()
+                }.font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.accent).buttonStyle(.plain)
+                    .accessibilityLabel("Open the saved wallpapers folder in Finder")
+            }.padding(18).background(Palette.card, in: RoundedRectangle(cornerRadius: 11))
+                .onAppear { refreshStills() }
         }
     }
 
@@ -372,7 +393,7 @@ struct SettingsView: View {
                 Spacer()
                 Menu {
                     Button("Save aquarium as PNG…", action: exportAction)
-                    Button("Set as macOS still wallpaper", action: desktopStillAction)
+                    Button("Set as macOS still wallpaper") { desktopStillAction(); refreshStills() }
                 } label: { Label("Save a moment", systemImage: "square.and.arrow.up").font(.system(size: 11, weight: .medium)) }.menuStyle(.borderlessButton).fixedSize()
             }.padding(.horizontal, 26).padding(.vertical, 16)
             if let message = store.message {

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "lineLength": 320,
+  "indentation": { "spaces": 4 },
+  "rules": {
+    "DoNotUseSemicolons": false,
+    "OneVariableDeclarationPerLine": false,
+    "OneCasePerLine": false,
+    "OrderedImports": false,
+    "GroupNumericLiterals": false,
+    "ReplaceForEachWithForLoop": false
+  }
+}

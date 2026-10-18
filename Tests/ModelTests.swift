@@ -989,21 +989,38 @@ private func population(_ counts: [FishSpecies: Int]) -> AquariumConfiguration {
     // MARK: Wallpaper stills
 
     @MainActor static func wallpaperStillTests(_ t: TestRun) {
-        t.test("wallpaper stills are pruned only when old, unused, and not among the newest") {
-            let now = Date()
-            let folder = URL(fileURLWithPath: "/stills", isDirectory: true)
-            func still(_ name: String, daysOld: Double) -> WallpaperStills.Still {
-                WallpaperStills.Still(url: folder.appendingPathComponent(name), created: now.addingTimeInterval(-daysOld * 86400))
+        t.test("saving wallpaper stills preserves older images for other Spaces and displays") {
+            let files = FileManager.default
+            let folder = files.temporaryDirectory.appendingPathComponent("stillwater-stills-\(UUID().uuidString)", isDirectory: true)
+            try files.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? files.removeItem(at: folder) }
+            let oldImage = Data("existing wallpaper".utf8)
+            // Exceed the former eight-image limit and fourteen-day cutoff. Any of these
+            // images may still belong to a Space or display the app cannot currently query.
+            let existing = (0..<12).map { folder.appendingPathComponent("riverlight-old-\($0).png") }
+            for url in existing {
+                try oldImage.write(to: url)
+                try files.setAttributes([.creationDate: Date().addingTimeInterval(-90 * 86400)], ofItemAtPath: url.path)
             }
-            // Twelve stills: the eight newest are kept regardless of age or use.
-            var stills = (0..<12).map { still("s\($0).png", daysOld: Double($0) * 5) }
-            stills.append(still("notes.txt", daysOld: 100))
-            let inUse = [folder.appendingPathComponent("s10.png")]
-            let removed = WallpaperStills.obsolete(existing: stills, keeping: inUse, now: now).map(\.lastPathComponent)
-            t.check(removed == ["s8.png", "s9.png", "s11.png"], "Only old, unused PNGs beyond the newest eight are deleted (got \(removed))")
-            let recent = (0..<12).map { still("r\($0).png", daysOld: Double($0) * 0.5) }
-            t.check(WallpaperStills.obsolete(existing: recent, keeping: [], now: now).isEmpty, "Recent stills are kept, since another Space may show them")
-            t.check(WallpaperStills.obsolete(existing: [], keeping: inUse, now: now).isEmpty, "An empty folder deletes nothing")
+            let image = Data("new wallpaper".utf8)
+            let first = try WallpaperStills.save(image, theme: .river, in: folder)
+            let second = try WallpaperStills.save(image, theme: .river, in: folder)
+            t.check(first != second, "Repeated saves must use distinct paths for macOS wallpaper caching")
+            for url in [first, second] {
+                let saved = try Data(contentsOf: url)
+                t.check(saved == image, "New wallpaper contents are saved intact")
+            }
+            for url in existing {
+                let saved = try Data(contentsOf: url)
+                t.check(saved == oldImage, "Older wallpapers remain available and unchanged")
+            }
+            // The Settings summary counts only PNG stills and their total size, so the
+            // retained files are visible instead of growing silently.
+            try Data("not a still".utf8).write(to: folder.appendingPathComponent("notes.txt"))
+            let summary = WallpaperStills.summary(in: folder)
+            t.check(summary.count == 14, "Summary counts every saved PNG still (got \(summary.count))")
+            t.check(summary.bytes == Int64(12 * oldImage.count + 2 * image.count), "Summary totals PNG bytes only (got \(summary.bytes))")
+            t.check(WallpaperStills.summary(in: folder.appendingPathComponent("missing")).count == 0, "A missing folder summarizes as empty")
         }
     }
 }

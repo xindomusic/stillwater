@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 — 2026-10-17
+
+- Saved wallpapers are retained until manually removed, protecting images still used by other Spaces or disconnected displays. Settings now shows how many stills are saved and how much space they take, with a button to open their folder, so they no longer accumulate invisibly.
+- PNG and wallpaper exports preserve the current lighting during a day/night transition.
+- Under the hood: the whole app now compiles in Swift 6 language mode with strict concurrency checking. Species-only behavior (shrimp, crab, loach) moved into a single enum payload so other fish no longer carry it, feeding and sand-bed logic split into their own simulation files, and crab gait constants are generated into the shader from the simulation instead of being matched by hand. Build scripts share one source list, the rendering tests explain themselves when run without a graphical session, and the performance probe reports budgets for frame rate, memory, and Still-mode CPU. No behavior changes are intended; the full model and rendering suites pass, with new checks for the stills summary and the generated shader constants.
+
 ## 1.7.0 — 2026-09-25
 
 - Loaches keep a daily rhythm like real kuhli loaches: long rests (sometimes at the foot of a rock, sometimes lying alongside others), long unhurried stretches of foraging with the nose down in the sand, and now and then a brisker roam. Speeds are mixed: mostly still or slow, some steady swimming, and occasional quick darts, sometimes in playful zigzag bursts that a neighbour joins. Every rest has its own pose, curved or angled; the head stays down while foraging instead of flicking up; a loach never darts into the end of the bed or into a neighbour.
